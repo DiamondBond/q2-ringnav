@@ -10,4 +10,3 @@ dist/*
 *.squashfs
 
 __pycache__/
-q2-ringnav.png
