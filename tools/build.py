@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""Reproducibly patch only the audited Q2 V1.32 ZIP. Requires LLVM and squashfs-tools."""
+import argparse, hashlib, io, json, pathlib, re, struct, subprocess, tarfile, zipfile
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+ZIP_SHA = '154c17822d09be001be35c03d2d3488424dee195221790bd70864480d55b0f00'
+DEMO_SHA = '2c5f06142850b4fc168f82b44a81550cce0a5b4b9fe1c179dced4a08a3049138'
+BASE = 0xb00000
+HOOK = 0x4e85c8
+
+def run(*args):
+    return subprocess.check_output([str(a) for a in args], text=True)
+def sha(b): return hashlib.sha256(b).hexdigest()
+def check(condition, message):
+    if not condition: raise ValueError(message)
+def symbols(p):
+    out = {}
+    for line in run('readelf', '-Ws', p).splitlines():
+        s = line.split()
+        if len(s) >= 8 and s[0].endswith(':'):
+            try: out[s[7]] = int(s[1], 16)
+            except ValueError: pass
+    return out
+
+def segments(b):
+    phoff = struct.unpack_from('<I', b, 28)[0]
+    size, num = struct.unpack_from('<HH', b, 42)
+    check(size == 32, 'Unexpected ELF program header size')
+    return [(phoff+i*size, struct.unpack_from('<8I', b, phoff+i*size)) for i in range(num)]
+def fileoff(b, a):
+    for _, (t, o, v, _, f, _, _, _) in segments(b):
+        if t == 1 and v <= a < v+f: return o+a-v
+    raise ValueError(f'Unmapped address {a:x}')
+
+FUNCTIONS = {
+ 'window_manager': ('void *', 'void'),
+ 'window_manager_get_top_window': ('void *', 'void *'),
+ 'window_manager_is_animating': ('int', 'void *'),
+ 'window_manager_get_pointer_pressed': ('int', 'void *'),
+ 'widget_get_visible': ('int', 'void *'),
+ 'widget_get_prop_bool': ('int', 'void *, const char *, int'),
+ 'widget_get_prop_int': ('int', 'void *, const char *, int'),
+ 'widget_get_prop_str': ('const char *', 'void *, const char *, const char *'),
+ 'widget_get_type': ('const char *', 'void *'),
+ 'widget_count_children': ('unsigned', 'void *'),
+ 'widget_get_child': ('void *', 'void *, unsigned'),
+ 'slide_menu_scroll_to_next': ('int', 'void *'),
+ 'slide_menu_scroll_to_prev': ('int', 'void *'),
+ 'table_client_stop_animator_scroll': ('int', 'void *'),
+ 'table_client_set_yoffset': ('int', 'void *, int'),
+ 'scroll_view_set_offset': ('int', 'void *, int, int'),
+ 'widget_animator_pause': ('int', 'void *'),
+ 'widget_animator_destroy': ('int', 'void *'),
+}
+GLOBALS = ['g_backlight_status', 'g_lockscreen_pageflag', 'g_testmode_flag',
+           'g_guideflag', 'g_poweroff_state', 'g_usblink_status', 'bt__recv_pageflag']
+
+def build(zip_path, out, step):
+    out.mkdir(parents=True, exist_ok=True)
+    check(not (out/'update.tar').exists(), 'Output already exists; use a fresh --out directory')
+    raw = zip_path.read_bytes()
+    check(sha(raw) == ZIP_SHA, 'Unsupported ZIP: SHA-256 differs from audited original')
+    with zipfile.ZipFile(io.BytesIO(raw)) as z:
+        tarbytes = z.read('Q2 Firmware V1.32/update.tar')
+    with tarfile.open(fileobj=io.BytesIO(tarbytes)) as t:
+        meta = t.getmembers()
+        check([m.name for m in meta] == ['firmware_v20.info','recovery-update',
+              'recovery-update/xImage','recovery-update/rootfs.squashfs'], 'Unexpected package members')
+        blobs = {m.name:t.extractfile(m).read() for m in meta if m.isfile()}
+    info = blobs['firmware_v20.info'].decode().splitlines()
+    check(info[:2] == ['Shanling Q2','V1.32'], 'Wrong model/version')
+    for line in info[2:]:
+        digest, name = line.split()
+        check(hashlib.md5(blobs[name]).hexdigest() == digest, 'Stock MD5 mismatch')
+    sq = out/'stock.squashfs'; sq.write_bytes(blobs['recovery-update/rootfs.squashfs'])
+    raw_demo = subprocess.check_output(['unsquashfs','-cat',str(sq),'release/bin/demo'])
+    check(sha(raw_demo) == DEMO_SHA, 'Unsupported demo binary')
+    demo = out/'stock-demo'; demo.write_bytes(raw_demo)
+    syms = symbols(demo)
+    check(syms['on_wm_keyup_before_fun'] == HOOK, 'Callback address mismatch')
+    header = ['#define RING_STEP '+str(step),
+              'extern int stock_keyup_trampoline(void *, void *);',
+              '#define stock_keyup stock_keyup_trampoline']
+    for name,(ret,args) in FUNCTIONS.items():
+        header.append(f'#define {name} (({ret} (*)({args}))0x{syms[name]:x}u)')
+    for name in GLOBALS:
+        header.append(f'#define {name} (*(volatile unsigned char *)0x{syms[name]:x}u)')
+    (out/'stock.h').write_text('\n'.join(header)+'\n')
+    flags = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
+             '-mno-abicalls','-fno-pic','-G0','-ffreestanding','-fno-builtin',
+             '-fno-stack-protector','-fno-unwind-tables','-fno-asynchronous-unwind-tables',
+             '-Os','-Wall','-Wextra','-Werror']
+    run('clang',*flags,'-I',out,'-c',ROOT/'patch/ringnav.c','-o',out/'ringnav.o')
+    run('clang',*flags,'-c',ROOT/'patch/trampoline.S','-o',out/'trampoline.o')
+    run('ld.lld','-m','elf32ltsmip','-T',ROOT/'patch/link.ld','-e','ringnav',
+        out/'ringnav.o',out/'trampoline.o','-o',out/'patch.elf')
+    run('llvm-objcopy','-O','binary',out/'patch.elf',out/'patch.bin')
+    payload = (out/'patch.bin').read_bytes()
+    ps = symbols(out/'patch.elf')
+    check(len(payload) < 65536, 'Unexpected patch size')
+    patched = bytearray(raw_demo)
+    hookoff = fileoff(patched, HOOK)
+    check(patched[hookoff:hookoff+12].hex() == '54001c3cf8e69c2721e09903', 'Unexpected hook instructions')
+    patched[hookoff:hookoff+8] = struct.pack('<II', 0x08000000|(ps['ringnav']>>2), 0)
+    # Single shared version literal: About display and updater equality check.
+    check(patched.count(b'V1.32\0') == 1, 'Version literal is not unique')
+    patched = patched.replace(b'V1.32\0', b'V1.3R\0')
+    nulls = [(o,p) for o,p in segments(patched) if p[0] == 0]
+    check(len(nulls) == 1 and nulls[0][0] == segments(patched)[-1][0], 'No final PT_NULL slot')
+    check(all(p[2]+p[5] < BASE for _,p in segments(patched) if p[0] == 1), 'Patch mapping overlaps')
+    appendoff = (len(patched)+65535)&~65535
+    patched.extend(bytes(appendoff-len(patched)))
+    patched.extend(payload)
+    struct.pack_into('<8I',patched,nulls[0][0],1,appendoff,BASE,BASE,len(payload),len(payload),5,65536)
+    (out/'demo').write_bytes(patched)
+    (out/'patch.dis').write_text(run('llvm-objdump','-d',out/'patch.elf'))
+    # Pseudo-file round trip preserves every original inode's metadata and hardlinks.
+    pseudo = out/'root.pseudo'
+    run('unsquashfs','-pf',pseudo,sq)
+    p = pseudo.read_bytes()
+    old = re.search(rb'^release/bin/demo R (\d+) (\d+) (\d+) (\d+) .+$',p,re.M)
+    check(old is not None, 'Missing demo pseudo inode')
+    # mksquashfs takes "/" from the source dir, not the pseudo file; carry stock values over.
+    root = re.search(rb'^/ D (\d+) (\d+) (\d+) (\d+)$',p,re.M)
+    check(root is not None, 'Missing root pseudo inode')
+    t,mode,uid,gid = (x.decode() for x in root.groups())
+    rootargs = ['-root-time',t,'-root-mode',mode,'-root-uid',uid,'-root-gid',gid]
+    # Paths are passed through a shell by mksquashfs F entries; quote them explicitly.
+    import shlex
+    replacement = b'release/bin/demo F '+b' '.join(old.groups())+b' cat '+shlex.quote(str(out/'demo')).encode()
+    p = p[:old.start()]+replacement+p[old.end():]
+    pseudo.write_bytes(p)
+    (out/'empty').mkdir()
+    newsq = out/'rootfs.squashfs'
+    epoch = struct.unpack_from('<I',sq.read_bytes(),8)[0]
+    run('mksquashfs',out/'empty',newsq,'-pf',pseudo,'-noappend','-comp','lzo',
+        '-b','131072','-Xcompression-level','9','-mkfs-time',epoch,*rootargs,'-processors','1','-no-progress')
+    # Every inode except demo must keep stock name/type/mtime/mode/uid/gid (size/offset fields shift).
+    def inodes(image):
+        text = subprocess.check_output(['unsquashfs','-pf','-',str(image)]).split(b'\n# START OF DATA')[0]
+        return sorted(l.split()[:6] for l in text.splitlines() if l and not l.startswith((b'#',b'release/bin/demo ')))
+    check(inodes(newsq) == inodes(sq), 'Repacked rootfs metadata differs from stock')
+    blobs['recovery-update/rootfs.squashfs'] = newsq.read_bytes()
+    # Stock image proves this size fits; do not enlarge beyond its padded size.
+    check(len(blobs['recovery-update/rootfs.squashfs']) <= sq.stat().st_size, 'Repacked rootfs exceeds stock size')
+    blobs['firmware_v20.info'] = ('Shanling Q2\nV1.3R\n'+''.join(
+        hashlib.md5(blobs[n]).hexdigest()+'  '+n+'\n' for n in [
+            'recovery-update/xImage','recovery-update/rootfs.squashfs'])).encode()
+    with tarfile.open(out/'update.tar','w',format=tarfile.GNU_FORMAT) as t:
+        for m in meta:
+            data = blobs.get(m.name)
+            if data is not None: m.size=len(data)
+            t.addfile(m,io.BytesIO(data) if data is not None else None)
+    manifest = dict(input_zip_sha256=ZIP_SHA, stock_demo_sha256=DEMO_SHA,
+        demo_sha256=sha(patched), patch_sha256=sha(payload), update_sha256=sha((out/'update.tar').read_bytes()),
+        rootfs_sha256=sha(newsq.read_bytes()), kernel_sha256=sha(blobs['recovery-update/xImage']),
+        hook_address=hex(HOOK), hook_file_offset=hex(hookoff), patch_address=hex(BASE),
+        patch_file_offset=hex(appendoff), patch_bytes=len(payload), ring_step_pixels=step,
+        version='V1.3R', functions={n:hex(syms[n]) for n in FUNCTIONS},
+        globals={n:hex(syms[n]) for n in GLOBALS}, patch_symbols={n:hex(v) for n,v in ps.items()},
+        tools={t:run(t,'--version').splitlines()[0] for t in ['clang','ld.lld','llvm-objcopy']})
+    (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+    print(json.dumps({k:manifest[k] for k in ['update_sha256','patch_bytes','version']},indent=2))
+
+if __name__ == '__main__':
+    ap=argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('zip',type=pathlib.Path)
+    ap.add_argument('--out',type=pathlib.Path,default=ROOT/'build')
+    ap.add_argument('--step',type=int,default=48,choices=range(8,129),metavar='8..128')
+    a=ap.parse_args()
+    build(a.zip,a.out.resolve(),a.step)

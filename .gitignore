@@ -1,0 +1,13 @@
+# Vendor firmware and anything derived from it (Shanling's copyrighted code)
+stock/
+work/
+build/
+build-final/
+dist/*
+!dist/manifest.json
+*.zip
+*.tar
+*.squashfs
+
+__pycache__/
+q2-ringnav.png
