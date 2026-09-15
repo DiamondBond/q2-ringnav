@@ -52,6 +52,15 @@ class Machine:
         self.word(a+0x0c,240); self.word(a+0x78,48); self.word(a+0x7c,960 if t=='scroll_view' else 100)
         self.byte(a+0x91,1)
         return a
+    def entry(self,parent,y=0,index=None,t='list_item'):
+        """A leafless tap target: emitter with one EVT_CLICK item, widget_y offset y, height 48."""
+        a=self.node(t)
+        em=self.alloc(4); it=self.alloc(0x28)
+        self.word(a+0x60,em); self.word(em,it); self.word(it+8,0x10c)
+        self.word(a+0x48,parent); self.word(a+0x04,y); self.word(a+0x0c,48)
+        if index is not None: self.word(a+0x78,index)
+        return a
+    def focused(self,w): return self.u.mem_read(w+0x24,1)[0]&0x80
     def hook(self,u,address,size,_):
         if address not in self.handlers: return
         name=self.handlers[address]
@@ -69,8 +78,15 @@ class Machine:
         elif name in ('widget_get_prop_bool','widget_get_prop_int'): ret=n.get(self.text(b),c)
         elif name=='widget_count_children': ret=len(n['children'])
         elif name=='widget_get_child': ret=n['children'][b] if b<len(n['children']) else 0
+        elif name=='widget_set_focused_internal':
+            cur=struct.unpack('<H',self.u.mem_read(a+0x24,2))[0]
+            self.u.mem_write(a+0x24,struct.pack('<H',(cur|0x80) if b else (cur&~0x80))); ret=0
+        elif name=='pointer_event_init': ret=a
+        elif name=='widget_dispatch_async': ret=0
         elif name=='table_client_set_yoffset': self.word(a+0x80,b); ret=0
+        elif name=='table_client_scroll_to': self.word(a+0x80,b); ret=0
         elif name=='scroll_view_set_offset': self.word(a+0x80,b); self.word(a+0x84,c); ret=0
+        elif name=='scroll_view_scroll_to': self.word(a+0x80,b); self.word(a+0x84,c); ret=0
         else: ret=0
         # Clobber caller-saved registers to catch accidental ABI assumptions.
         for r in [UC_MIPS_REG_V1,*REGS,UC_MIPS_REG_T0,UC_MIPS_REG_T1,UC_MIPS_REG_T2,
@@ -96,7 +112,8 @@ class Machine:
         child=self.node(t)
         self.top=self.node('window',name,[child])
         return child
-    def moved(self): return [x for x in self.calls if x[0] in ('scroll_view_set_offset','table_client_set_yoffset','slide_menu_scroll_to_next','slide_menu_scroll_to_prev')]
+    def moved(self): return [x for x in self.calls if x[0] in ('scroll_view_scroll_to','scroll_view_set_offset','table_client_scroll_to','table_client_set_yoffset','slide_menu_scroll_to_next','slide_menu_scroll_to_prev')]
+    def dispatched(self): return [x for x in self.calls if x[0]=='widget_dispatch_async']
 
 checks=0
 def passed():
@@ -132,9 +149,40 @@ assert m.call()==11 and m.moved()[0][1]==shown; passed()
 m.top=m.node('window','sysset_page',[hidden,shown]); assert m.call()==11 and not m.moved(); passed()
 for attribute in ['visible','enable']:
     m=Machine(); w=m.page(); m.nodes[w][attribute]=0; assert m.call()==11 and not m.moved(); passed()
-m=Machine(); w=m.page(); m.word(w+0xe8,0x1000900)
-assert m.call()==11 and m.get(w+0xe8)==0
-assert [x[0] for x in m.calls if 'animator_' in x[0]]==['widget_animator_pause','widget_animator_destroy']; passed()
+# An in-flight scroll animation is retargeted by the animated glide, not torn down.
+m=Machine(); w=m.page(); m.word(w+0x84,100)
+assert m.call()==11 and m.moved()[0][0]=='scroll_view_scroll_to'
+assert m.get(w+0x84)==148 and m.get(w+0xe8)==0; passed()
+
+# Ring navigation focuses an entry and glides it fully into view one detent at a time.
+m=Machine(); w=m.page(); m.word(w+0x0c,96); m.word(w+0x7c,1000)
+entries=[m.entry(w,i*48) for i in range(5)]
+m.nodes[w]['children']=entries
+assert m.call()==11 and m.focused(entries[0]) and not m.moved()
+assert m.call()==11 and m.focused(entries[1]) and not m.moved()
+assert m.call()==11 and m.focused(entries[2]) and m.get(w+0x84)==48
+assert m.moved()[0][0]=='scroll_view_scroll_to' and m.moved()[0][3]==48; passed()
+# A short center press dispatches the native async EVT_CLICK to the focused entry.
+assert m.call(171)==11 and m.dispatched()[0][1]==entries[2]; passed()
+# ... and is ignored (stock play/pause) until the ring has focused something.
+m2=Machine(); w2=m2.page(); m2.word(w2+0x0c,96); e=m2.entry(w2); m2.nodes[w2]['children']=[e]
+assert m2.call(171)==0 and not m2.dispatched(); passed()
+
+# table_client selection is tracked by row index and re-bound after scrolling.
+m=Machine(); w=m.page('sysset_page','table_client')
+m.word(w+0x78,48); m.word(w+0x7c,3); m.word(w+0x0c,96)
+rows=[m.entry(w,index=i) for i in range(3)]
+m.nodes[w]['children']=rows
+assert m.call()==11 and m.focused(rows[0]) and m.get(w+0x80)==0
+assert m.call()==11 and m.focused(rows[1]) and m.get(w+0x80)==0
+assert m.call()==11 and m.focused(rows[2]) and m.get(w+0x80)==48
+assert m.call(171)==11 and m.dispatched()[0][1]==rows[2]; passed()
+
+# slide_menu center activates the child at its native value (@0x78).
+m=Machine(); w=m.page('home_page','slide_menu'); m.word(w+0x78,1)
+child=[m.node('slide_item'),m.entry(w)]
+m.nodes[w]['children']=child
+assert m.call(171)==11 and m.dispatched()[0][1]==child[1]; passed()
 # The actual stock filter runs first, including each screen-off lock mode.
 for backlight in [0,1]:
     for mode in range(4):

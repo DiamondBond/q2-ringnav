@@ -7,8 +7,8 @@ Release: `dist/Q2 Firmware V1.3R.zip` (same layout as the stock ZIP).
 
 | file | sha256 |
 |---|---|
-| `Q2 Firmware V1.3R.zip` | `4039428883fc85a08d5891d50e8dd6fdd3a720d357413ed37ad1094f634ef46c` |
-| `update.tar` | `fa805b7b6cea189f9cf32ec97c008721d322023e137e4aca2f8a6a4657ab90ed` |
+| `Q2 Firmware V1.3R.zip` | `4190d16a07fe055b129af7f56a1cf8b78350ce29effa873974aa95f5d39f2c29` |
+| `update.tar` | `84b1c2d7bb894d79a7f283e6b49f2b5097bff4bfd19e95bda56cf0fc464a90e4` |
 
 Every other hash, address and tool version is in `dist/manifest.json`.
 
@@ -26,7 +26,7 @@ In `demo`:
 1. **Hook:** `on_wm_keyup_before_fun` (0x4e85c8) is AWTK's key-up filter. Its first two
    instructions become `j ringnav; nop`. `patch/trampoline.S` re-creates the `$gp` value they set
    up, then resumes at 0x4e85d4, so the stock filter still runs first and unchanged.
-2. **Payload:** `patch/ringnav.c` (3256 bytes, loaded at 0xb00000) goes in the unused final
+2. **Payload:** `patch/ringnav.c` (5640 bytes, loaded at 0xb00000) goes in the unused final
    `PT_NULL` program header, which becomes a new R+X `PT_LOAD`. It calls stock AWTK functions by
    address via `$t9`.
 3. **Version:** the single `V1.32\0` literal becomes `V1.3R\0`. The About screen and the updater
@@ -40,10 +40,20 @@ only when all of these hold:
 - exactly one visible, enabled `slide_menu`, `table_client` or vertical non-snapping `scroll_view` exists.
   For `pages` widgets, only the active page is searched.
 
-When those hold, it moves by `--step` pixels (default 48) or one carousel item, clamps at the list
-ends, and consumes the key, so hitting the end of a list never changes volume. Ring input is also
-consumed during window animation and touch drags. All other screens get stock volume behaviour,
-including playing, volume, EQ and screensaver.
+When those hold it walks the list one entry per detent, keeps a native AWTK focused widget on the
+entry the wheel is on, and glides the list (300 ms) so that entry stays fully visible. Tap targets
+are the widgets that carry an `EVT_CLICK` handler, the same ones a finger would hit. A short center
+Play/Pause press then activates the focused entry with the same async `EVT_CLICK` that
+`widget_on_keyup` dispatches (`pointer_event_init` + `widget_dispatch_async`), so menus, lists and
+the home carousel are selected without faking touch coordinates. The home `slide_menu` uses its
+native `value` (index @0x78); `table_client` rows are selected by row index (@0x78) because the
+visible rows are re-bound on every scroll. If a `scroll_view`/`table_client` has no tap targets or
+no entry is focused yet, the center key still falls through to stock play/pause.
+
+The ring is consumed at list ends, so hitting the end never changes volume, and it is also consumed
+during window animation and touch drags. All other screens get stock volume behaviour, including
+playing, volume, EQ and screensaver, and play/pause from the center key is untouched everywhere
+outside `patch/contexts.inc` — in particular on Now Playing.
 
 ## Build
 
@@ -55,13 +65,18 @@ Needs clang/lld/llvm-objcopy, squashfs-tools 4.7 (tested 4.7.5) and the original
 ## Validation
 
 - **Emulation test:** `tools/test_patch.py <outdir>` (needs `unicorn==2.1.4`) runs the real
-  patched `demo` machine code in Unicorn with mocked AWTK services. It covers 104 scenarios:
+  patched `demo` machine code in Unicorn with mocked AWTK services. It covers 109 scenarios:
   - scrolling and clamping in both directions
   - empty lists
   - blocked screens and flags
   - animation/touch
   - ambiguous or hidden panes
-  - animator cleanup
+  - one-entry-at-a-time focus tracking and the 300 ms glide target
+  - a short center press dispatching the native async `EVT_CLICK` to the focused entry
+  - center falling through to stock play/pause until something is focused
+  - `table_client` row-index selection across a re-bound row
+  - `slide_menu` value selection
+  - retargeting an in-flight scroll instead of tearing it down
   - non-ring keys
   - the stock `get_direction` wraparound
   - stock vs patched results for every key-lock mode × backlight × key

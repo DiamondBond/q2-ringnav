@@ -43,13 +43,14 @@ FUNCTIONS = {
  'widget_get_type': ('const char *', 'void *'),
  'widget_count_children': ('unsigned', 'void *'),
  'widget_get_child': ('void *', 'void *, unsigned'),
+ 'widget_set_focused_internal': ('int', 'void *, int'),
+ 'widget_dispatch_async': ('int', 'void *, void *'),
+ 'pointer_event_init': ('void *', 'void *, int, void *, int, int'),
  'slide_menu_scroll_to_next': ('int', 'void *'),
  'slide_menu_scroll_to_prev': ('int', 'void *'),
  'table_client_stop_animator_scroll': ('int', 'void *'),
  'table_client_set_yoffset': ('int', 'void *, int'),
- 'scroll_view_set_offset': ('int', 'void *, int, int'),
- 'widget_animator_pause': ('int', 'void *'),
- 'widget_animator_destroy': ('int', 'void *'),
+ 'scroll_view_scroll_to': ('int', 'void *, int, int, int'),
 }
 GLOBALS = ['g_backlight_status', 'g_lockscreen_pageflag', 'g_testmode_flag',
            'g_guideflag', 'g_poweroff_state', 'g_usblink_status', 'bt__recv_pageflag']
