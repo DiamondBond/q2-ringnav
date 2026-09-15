@@ -50,7 +50,7 @@ FUNCTIONS = {
  'slide_menu_scroll_to_prev': ('int', 'void *'),
  'table_client_stop_animator_scroll': ('int', 'void *'),
  'table_client_set_yoffset': ('int', 'void *, int'),
- 'scroll_view_scroll_to': ('int', 'void *, int, int, int'),
+ 'scroll_view_scroll_delta_to': ('int', 'void *, int, int, int'),
 }
 GLOBALS = ['g_backlight_status', 'g_lockscreen_pageflag', 'g_testmode_flag',
            'g_guideflag', 'g_poweroff_state', 'g_usblink_status', 'bt__recv_pageflag']
@@ -104,7 +104,7 @@ def build(zip_path, out, step):
     patched[hookoff:hookoff+8] = struct.pack('<II', 0x08000000|(ps['ringnav']>>2), 0)
     # Single shared version literal: About display and updater equality check.
     check(patched.count(b'V1.32\0') == 1, 'Version literal is not unique')
-    patched = patched.replace(b'V1.32\0', b'V1.3R\0')
+    patched = patched.replace(b'V1.32\0', b'V1.4R\0')
     nulls = [(o,p) for o,p in segments(patched) if p[0] == 0]
     check(len(nulls) == 1 and nulls[0][0] == segments(patched)[-1][0], 'No final PT_NULL slot')
     check(all(p[2]+p[5] < BASE for _,p in segments(patched) if p[0] == 1), 'Patch mapping overlaps')
@@ -143,7 +143,7 @@ def build(zip_path, out, step):
     blobs['recovery-update/rootfs.squashfs'] = newsq.read_bytes()
     # Stock image proves this size fits; do not enlarge beyond its padded size.
     check(len(blobs['recovery-update/rootfs.squashfs']) <= sq.stat().st_size, 'Repacked rootfs exceeds stock size')
-    blobs['firmware_v20.info'] = ('Shanling Q2\nV1.3R\n'+''.join(
+    blobs['firmware_v20.info'] = ('Shanling Q2\nV1.4R\n'+''.join(
         hashlib.md5(blobs[n]).hexdigest()+'  '+n+'\n' for n in [
             'recovery-update/xImage','recovery-update/rootfs.squashfs'])).encode()
     with tarfile.open(out/'update.tar','w',format=tarfile.GNU_FORMAT) as t:
@@ -156,7 +156,7 @@ def build(zip_path, out, step):
         rootfs_sha256=sha(newsq.read_bytes()), kernel_sha256=sha(blobs['recovery-update/xImage']),
         hook_address=hex(HOOK), hook_file_offset=hex(hookoff), patch_address=hex(BASE),
         patch_file_offset=hex(appendoff), patch_bytes=len(payload), ring_step_pixels=step,
-        version='V1.3R', functions={n:hex(syms[n]) for n in FUNCTIONS},
+        version='V1.4R', functions={n:hex(syms[n]) for n in FUNCTIONS},
         globals={n:hex(syms[n]) for n in GLOBALS}, patch_symbols={n:hex(v) for n,v in ps.items()},
         tools={t:run(t,'--version').splitlines()[0] for t in ['clang','ld.lld','llvm-objcopy']})
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')

@@ -86,7 +86,8 @@ class Machine:
         elif name=='table_client_set_yoffset': self.word(a+0x80,b); ret=0
         elif name=='table_client_scroll_to': self.word(a+0x80,b); ret=0
         elif name=='scroll_view_set_offset': self.word(a+0x80,b); self.word(a+0x84,c); ret=0
-        elif name=='scroll_view_scroll_to': self.word(a+0x80,b); self.word(a+0x84,c); ret=0
+        elif name=='scroll_view_scroll_delta_to':
+            self.word(a+0x80,self.get(a+0x80)+b); self.word(a+0x84,self.get(a+0x84)+c); ret=0
         else: ret=0
         # Clobber caller-saved registers to catch accidental ABI assumptions.
         for r in [UC_MIPS_REG_V1,*REGS,UC_MIPS_REG_T0,UC_MIPS_REG_T1,UC_MIPS_REG_T2,
@@ -112,7 +113,7 @@ class Machine:
         child=self.node(t)
         self.top=self.node('window',name,[child])
         return child
-    def moved(self): return [x for x in self.calls if x[0] in ('scroll_view_scroll_to','scroll_view_set_offset','table_client_scroll_to','table_client_set_yoffset','slide_menu_scroll_to_next','slide_menu_scroll_to_prev')]
+    def moved(self): return [x for x in self.calls if x[0] in ('scroll_view_scroll_delta_to','scroll_view_set_offset','table_client_scroll_to','table_client_set_yoffset','slide_menu_scroll_to_next','slide_menu_scroll_to_prev')]
     def dispatched(self): return [x for x in self.calls if x[0]=='widget_dispatch_async']
 
 checks=0
@@ -124,9 +125,9 @@ for t,off in [('scroll_view',0x84),('table_client',0x80)]:
     m=Machine(); w=m.page(t=t)
     for _ in range(20): assert m.call()==11
     assert m.get(w+off)==min(20*manifest['ring_step_pixels'],720 if t=='scroll_view' else 4560)
-    assert m.call(172)==11
+    assert m.call(172)==11 and m.moved()
     for _ in range(120): m.call(172)
-    assert m.get(w+off)==0 and m.moved()
+    assert m.get(w+off)==0
     # Empty/short lists consume input without turning into volume changes.
     m.word(w+0x7c,0); assert m.call()==11 and m.get(w+off)==0
     passed()
@@ -151,7 +152,7 @@ for attribute in ['visible','enable']:
     m=Machine(); w=m.page(); m.nodes[w][attribute]=0; assert m.call()==11 and not m.moved(); passed()
 # An in-flight scroll animation is retargeted by the animated glide, not torn down.
 m=Machine(); w=m.page(); m.word(w+0x84,100)
-assert m.call()==11 and m.moved()[0][0]=='scroll_view_scroll_to'
+assert m.call()==11 and m.moved()[0][0]=='scroll_view_scroll_delta_to' and m.moved()[0][3]==48
 assert m.get(w+0x84)==148 and m.get(w+0xe8)==0; passed()
 
 # Ring navigation focuses an entry and glides it fully into view one detent at a time.
@@ -161,7 +162,7 @@ m.nodes[w]['children']=entries
 assert m.call()==11 and m.focused(entries[0]) and not m.moved()
 assert m.call()==11 and m.focused(entries[1]) and not m.moved()
 assert m.call()==11 and m.focused(entries[2]) and m.get(w+0x84)==48
-assert m.moved()[0][0]=='scroll_view_scroll_to' and m.moved()[0][3]==48; passed()
+assert m.moved()[0][0]=='scroll_view_scroll_delta_to' and m.moved()[0][3]==48; passed()
 # A short center press dispatches the native async EVT_CLICK to the focused entry.
 assert m.call(171)==11 and m.dispatched()[0][1]==entries[2]; passed()
 # ... and is ignored (stock play/pause) until the ring has focused something.

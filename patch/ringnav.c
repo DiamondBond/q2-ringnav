@@ -1,9 +1,10 @@
 /* Q2 V1.32: run on the UI thread, after the stock key-up lock filter.
  *
  * Ring navigation keeps a native AWTK focused widget on the list entry the wheel is on, glides the
- * list so that entry stays fully visible, and lets a short center Play/Pause press activate it with
- * the same async EVT_CLICK that widget_on_keyup dispatches for the focused widget. Everywhere else
- * (playing, volume, ...) the center key keeps its stock play/pause behaviour.
+ * list with the stock animated per-item scroll so that entry stays fully visible, and lets a short
+ * center Play/Pause press activate it with the same async EVT_CLICK that widget_on_keyup dispatches
+ * for the focused widget. Everywhere else (playing, volume, ...) the center key keeps its stock
+ * play/pause behaviour.
  */
 #include "stock.h"
 #define STOP 11
@@ -133,7 +134,7 @@ static int list_nav(void *w, int dir) {
     int y = widget_y(at[next], w), eh = I(at[next], 0x0c);
     int want = y < top ? y : y + eh > top + h ? y + eh - h : top;
     set_focus(old, at[next]);
-    if (want != top) scroll_view_scroll_to(w, I(w, 0x80), clamp_step(want, I(w, 0x7c) - h, 0), GLIDE_MS);
+    if (want != top) scroll_view_scroll_delta_to(w, 0, want - top, GLIDE_MS);
     return STOP;
 }
 
@@ -217,7 +218,8 @@ int ringnav(void *ctx, void *event) {
         if (vh < 0 || h <= 0) return fallback;
         if (list_nav(w, dir)) return STOP;
         if (!dir) return result;
-        scroll_view_scroll_to(w, I(w, 0x80), clamp_step(I(w, 0x84), vh - h, dir * RING_STEP), GLIDE_MS);
+        int next = clamp_step(I(w, 0x84), vh - h, dir * RING_STEP);
+        if (next != I(w, 0x84)) scroll_view_scroll_delta_to(w, 0, next - I(w, 0x84), GLIDE_MS);
     }
     return STOP;
 }
