@@ -2,10 +2,10 @@
 
 The Q2 splash shown on the screen at power-on is a JPEG inside the rootfs. There is no on-device setting; changing it is part of building a firmware update.
 
-| What | Where |
-| --- | --- |
-| Image | `/release/assets/default/raw/images/xx/logo.jpg` (320x375 JPEG) |
-| Drawn by | `/usr/bin/display_logo` (libjpeg, writes `/dev/fb0`) |
+| What       | Where                                                             |
+| ---------- | ----------------------------------------------------------------- |
+| Image      | `/release/assets/default/raw/images/xx/logo.jpg` (320x375 JPEG)   |
+| Drawn by   | `/usr/bin/display_logo` (libjpeg, writes `/dev/fb0`)              |
 | Started by | `/etc/init.d/S11logo_display_shell`, as soon as `/dev/fb0` exists |
 
 ## Build an update with a custom logo

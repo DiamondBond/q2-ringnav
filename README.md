@@ -2,7 +2,7 @@
 
 Firmware mod for the Shanling Q2 that lets you use the scroll wheel to move through menus and press the centre button to select things.
 
-The touchscreen still works normally. Outside supported menus, the wheel still controls volume and the other buttons keep their normal behaviour.
+The touchscreen still works normally. Outside supported menus, the wheel still controls volume.
 
 **Latest firmware: V1.9R**
 
@@ -10,23 +10,21 @@ The touchscreen still works normally. Outside supported menus, the wheel still c
 
 ## Install
 
+Make sure the Q2 is charged before updating, and don't remove the microSD card while the update is running.
+
 1. Download the firmware ZIP from the latest release.
 2. Unzip it and copy `update.tar` to the root of your microSD card.
 3. On the Q2, go to **System settings → System Update → TF card update**.
 4. Confirm the update and wait for the player to restart.
 5. Check **About** and make sure it shows `V1.9R`.
 
-Make sure the Q2 is charged before updating, and don't remove the microSD card while the update is running.
+To restore stock firmware via the UI; flash the [Shanling Q2 official firmware](https://en.shanling.com/download/150) through **System settings → System Update → TF card update**.
 
-To restore stock firmware via the UI; flash the official Shanling Q2 V1.32 firmware through **System settings → System Update → TF card update**.
-
-If UI is not working, use [Shanling's recovery package](https://drive.google.com/file/d/1aINQfJu6n0JTQ4hOzzD1uSpSj3TS_NJj/view?usp=drive_link):
+If the UI is not working, use [Shanling's recovery package](https://drive.google.com/file/d/1aINQfJu6n0JTQ4hOzzD1uSpSj3TS_NJj/view?usp=drive_link):
 
 1. Copy the complete `recovery-update` folder to the root of the microSD card.
 2. Hold the previous-song button, then power on the Q2 with the centre button.
 3. The player will automatically check for a firmware update.
-
-[Shanling Q2 official firmware](https://en.shanling.com/download/150)
 
 ## Controls
 
