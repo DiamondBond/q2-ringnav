@@ -1,46 +1,5 @@
-# Reference dump for the Q2 wheel emitter, stock V1.32, made with llvm-objdump on the
-# work root. encoderknob_thread_run (0x6256a0) is the sysfs notifier thread shown here;
-# the rotation handler that follows it (0x6258e0, unnamed in the symbol table) calls
-# get_direction (0x62587c) and posts key events 172/173 into the main loop. The payload
-# hooks on_wm_keyup_before_fun and treats those releases as wheel detents.
-
-work/root/release/bin/demo:	file format elf32-mips
-
-Disassembly of section .text:
-
-006256a0 <encoderknob_thread_run>:
-  6257f0:      	lui	$gp, 0x40
-  6257f4:      	addiu	$gp, $gp, 0x14d0
-  6257f8:      	addu	$gp, $gp, $25
-  6257fc:      	addiu	$sp, $sp, -0x128 <g_play_info+0xffffffffff5bd2dc>
-  625800:      	lw	$25, -0x82c($gp) # memset@GLIBC_2.0
-  625804:      	addiu	$6, $zero, 0xfc
-  625808:      	sw	$16, 0x11c($sp)
-  62580c:      	move	$5, $zero
-  625810:      	move	$16, $4
-  625814:      	sw	$ra, 0x124($sp)
-  625818:      	addiu	$4, $sp, 0x1c
-  62581c:      	sw	$17, 0x120($sp)
-  625820:      	sw	$gp, 0x10($sp)
-  625824:      	sw	$zero, 0x18($sp)
-  625828:      	jalr	$25
-  62582c:      	addiu	$17, $sp, 0x18
-  625830:      	addiu	$5, $zero, 0xff
-  625834:      	lw	$gp, 0x10($sp)
-  625838:      	move	$4, $17
-  62583c:      	lw	$7, 0x14($16)
-  625840:      	lw	$6, -0x7fa4($gp) # 'of_checked'
-  625844:      	lw	$25, -0x5838($gp) # tk_snprintf
-  625848:      	jalr	$25
-  62584c:      	addiu	$6, $6, -0x2120 <g_play_info+0xffffffffff5bb2e4>
-  625850:      	addiu	$5, $16, 0x20
-  625854:      	lw	$4, 0x10($16)
-  625858:      	lw	$25, 0x18($16)
-  62585c:      	jalr	$25
-  625860:      	move	$6, $17
-  625864:      	lw	$17, 0x120($sp)
-  625868:      	lw	$ra, 0x124($sp)
-  62586c:      	sw	$zero, 0x20($16)
-  625870:      	lw	$16, 0x11c($sp)
-  625874:      	jr	$ra
-  625878:      	addiu	$sp, $sp, 0x128
+# Reference for the Q2 wheel emitter, stock V1.32, from llvm-objdump of the work root.
+# encoderknob_thread_run (0x6256a0) is the sysfs notifier thread; the rotation handler
+# that follows it (0x6258e0, unnamed in the symbol table) calls get_direction (0x62587c)
+# and posts key events 172/173 into the main loop. The payload hooks
+# on_wm_keyup_before_fun and treats those releases as wheel detents.

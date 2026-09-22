@@ -142,13 +142,6 @@ static void collect(void *w, entries_t *s, int depth) {
     for (unsigned i = 0; i < n; ++i) collect(widget_get_child(w, i), s, depth + 1);
 }
 
-static void *first_entry(void *w) {
-    void *one = (void *)0;
-    entries_t s = { &one, 0, 1, 256 };
-    collect(w, &s, 0);
-    return one;
-}
-
 /* Widget-owned properties die with the surface; never retain recycled row pointers. */
 #define SEL "_ringnav_index"
 #define TOUCH "_ringnav_touch"
@@ -210,12 +203,6 @@ static unsigned row_hash(void *w) {
     return h;
 }
 
-static int recall(int ctx, unsigned *hash) {
-    if (ctx < 0 || ctx >= POS_MEM) return -1;
-    if (hash) *hash = st.pos_hash[ctx];
-    return st.pos_id[ctx] - 1;
-}
-
 /* Context of the active top window; every caller already holds a navigation surface. */
 static int context_now(void) {
     void *top = window_manager_get_top_window(window_manager());
@@ -263,7 +250,9 @@ static int load(menu_t *m, void *w) {
     } else {
         if (m->kind == 3) m->rows = (int)n;
         for (unsigned i = 0; i < n && m->n < MAX_ENTRIES; ++i) {
-            void *r = widget_get_child(w, i), *e = first_entry(r);
+            void *r = widget_get_child(w, i), *e = (void *)0;
+            entries_t s = { &e, 0, 1, 256 };
+            collect(r, &s, 0);
             int id = m->kind == 2 ? I(r, ROW_INDEX) : (int)i;
             if (e && id >= 0 && id < m->rows) {
                 m->at[m->n] = e;
@@ -281,8 +270,9 @@ static int load(menu_t *m, void *w) {
      * keeps its viewport, so it does not re-read the table. A non-virtual list prefers the row
      * with the remembered text and falls back to the remembered index. */
     if (m->kind != 3 && count < 0) {
-        unsigned hash = 0;
-        int id = recall(context_now(), &hash);
+        int ctx = context_now();
+        int id = ctx >= 0 && ctx < POS_MEM ? st.pos_id[ctx] - 1 : -1;
+        unsigned hash = ctx >= 0 && ctx < POS_MEM ? st.pos_hash[ctx] : 0;
         if (id >= 0 && m->kind == 1 && hash) {
             for (int i = 0; i < m->n; ++i)
                 if (row_hash(m->at[i]) == hash) {

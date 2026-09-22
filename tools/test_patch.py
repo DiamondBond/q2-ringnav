@@ -502,17 +502,8 @@ assert m.call(O['KEY_CENTER'],gap=100)==11 and m.dispatched()[0][1]==es2[0]; pas
 m=Machine(); w,es=m.page_list(40,extent=40*48)
 m.paint(w)
 assert m.call(O['KEY_NEXT'])==11 and m.selected(w)==1
-assert m.call(O['KEY_NEXT'],gap=50)==11 and m.selected(w)==2
-assert m.call(O['KEY_NEXT'],gap=50)==11 and m.selected(w)==4
-assert m.call(O['KEY_NEXT'],gap=50)==11 and m.selected(w)==6
-assert m.call(O['KEY_NEXT'],gap=50)==11 and m.selected(w)==8
-assert m.call(O['KEY_NEXT'],gap=50)==11 and m.selected(w)==12
-assert m.call(O['KEY_NEXT'],gap=50)==11 and m.selected(w)==16
-assert m.call(O['KEY_NEXT'],gap=50)==11 and m.selected(w)==20
-assert m.call(O['KEY_NEXT'],gap=50)==11 and m.selected(w)==28
-assert m.call(O['KEY_NEXT'],gap=50)==11 and m.selected(w)==36
-assert m.call(O['KEY_NEXT'],gap=50)==11 and m.selected(w)==39
-assert m.call(O['KEY_NEXT'],gap=50)==11 and m.selected(w)==39
+for want in (2,4,6,8,12,16,20,28,36,39,39):
+    assert m.call(O['KEY_NEXT'],gap=50)==11 and m.selected(w)==want
 assert m.call(O['KEY_PREV'],gap=50)==11 and m.selected(w)==38
 assert m.call(O['KEY_NEXT'],gap=1000)==11 and m.selected(w)==39; passed()
 # Fast detents accelerate the pixel-scroll fallback the same way.
