@@ -70,7 +70,7 @@ GLOBALS = ['g_backlight_status', 'g_lockscreen_pageflag', 'g_testmode_flag',
            'g_guideflag', 'g_poweroff_state', 'g_usblink_status', 'bt__recv_pageflag',
            'g_power_longkey', 'g_ingore_bootkey_flag']
 
-def build(zip_path, out, step):
+def build(zip_path, out):
     out.mkdir(parents=True, exist_ok=True)
     check(not (out/'update.tar').exists(), 'Output already exists; use a fresh --out directory')
     raw = zip_path.read_bytes()
@@ -93,7 +93,7 @@ def build(zip_path, out, step):
     demo = out/'stock-demo'; demo.write_bytes(raw_demo)
     syms = symbols(demo)
     check(syms['on_wm_keyup_before_fun'] == HOOK, 'Callback address mismatch')
-    header = ['#define RING_STEP '+str(step),
+    header = ['#define RING_STEP 48',
               'extern int stock_keyup_trampoline(void *, void *);',
               '#define stock_keyup stock_keyup_trampoline']
     for name in ('touch', 'paint', 'dispatch'):
@@ -184,7 +184,7 @@ def build(zip_path, out, step):
         demo_sha256=sha(patched), patch_sha256=sha(payload), update_sha256=sha((out/'update.tar').read_bytes()),
         rootfs_sha256=sha(newsq.read_bytes()), kernel_sha256=sha(blobs['recovery-update/xImage']),
         hook_address=hex(HOOK), hook_file_offset=hex(hookoff), patch_address=hex(BASE),
-        patch_file_offset=hex(appendoff), patch_bytes=len(payload), ring_step_pixels=step,
+        patch_file_offset=hex(appendoff), patch_bytes=len(payload), ring_step_pixels=48,
         version='V1.7R', hooks=hooks,
         patch_symbols={n:hex(v) for n,v in ps.items() if n.startswith('stock_')},
         tools={t:run(t,'--version').splitlines()[0] for t in ['clang','ld.lld','llvm-objcopy']})
@@ -195,6 +195,5 @@ if __name__ == '__main__':
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('zip',type=pathlib.Path)
     ap.add_argument('--out',type=pathlib.Path,default=ROOT/'build')
-    ap.add_argument('--step',type=int,default=48,choices=range(8,129),metavar='8..128')
     a=ap.parse_args()
-    build(a.zip,a.out.resolve(),a.step)
+    build(a.zip,a.out.resolve())

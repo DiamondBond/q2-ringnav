@@ -28,7 +28,7 @@ To go back to stock, just flash the official Shanling Q2 V1.32 firmware again.
 
 - Turn the scroll wheel to move through menu items.
 - Short press the centre button to open the highlighted item.
-- Double-press the centre button to turn the screen off and on again, the way the stock short press did.
+- Double-press the centre button to turn the screen off.
 - Tap and swipe still work normally.
 - Turning the wheel during a swipe stops the scrolling and takes over again.
 - Outside supported menus, the wheel goes back to normal volume control.
