@@ -205,12 +205,16 @@ typedef struct {
     unsigned one, two;
 } row_id_t;
 
+static unsigned hash_bytes(unsigned h, const unsigned char *s, unsigned n) {
+    for (unsigned i = 0; i < n; ++i) h = (h ^ s[i]) * 16777619u;
+    return h;
+}
+
 static void row_hash_text(const unsigned *s, unsigned *h) {
-    *h = 2166136261u;
-    /* Stock wchar_t is UTF-32. Hash all four bytes, including zero bytes within a character. */
-    for (; *s; ++s)
-        for (unsigned shift = 0; shift < 32; shift += 8)
-            *h = (*h ^ ((*s >> shift) & 255)) * 16777619u;
+    unsigned n = 0;
+    while (s[n]) ++n;
+    /* Stock wchar_t is UTF-32; hash all four bytes, zero bytes inside a character included. */
+    *h = hash_bytes(2166136261u, (const unsigned char *)s, 4 * n);
     if (!*h) *h = 1; /* zero denotes missing text */
 }
 
@@ -234,11 +238,6 @@ static row_id_t row_id(void *w) {
     int budget = 32;
     row_id_walk(w, 0, &budget, &id);
     return id;
-}
-
-static unsigned hash_bytes(unsigned h, const unsigned char *s, unsigned n) {
-    for (unsigned i = 0; i < n; ++i) h = (h ^ s[i]) * 16777619u;
-    return h;
 }
 
 /* The local list loaders use these browsing globals: folder_enter/back maintain g_folder_path;
@@ -368,13 +367,10 @@ static int load(menu_t *m, void *w) {
      * and falls back to the index when no text matches. */
     if (m->kind != 3 && count < 0) {
         int ctx = m->ctx;
-        if (ctx >= 0 && ctx < POS_MEM && st.pos_scope[ctx] != m->scope) ctx = -1;
-        int id = ctx >= 0 && ctx < POS_MEM ? st.pos_id[ctx] - 1 : -1;
-        unsigned hash = 0, hash2 = 0;
-        if (ctx >= 0 && ctx < POS_MEM) {
-            hash = st.pos_hash[ctx];
-            hash2 = st.pos_hash2[ctx];
-        }
+        if (ctx < 0 || ctx >= POS_MEM || st.pos_scope[ctx] != m->scope) ctx = -1;
+        int id = ctx < 0 ? -1 : st.pos_id[ctx] - 1;
+        unsigned hash = ctx < 0 ? 0 : st.pos_hash[ctx];
+        unsigned hash2 = ctx < 0 ? 0 : st.pos_hash2[ctx];
         if (id >= 0 && m->kind == 1 && hash) {
             /* A secondary-text match outranks proximity; equal ranks keep the earlier row. */
             int best = -1, best_dist = 0, best_second = 0;
