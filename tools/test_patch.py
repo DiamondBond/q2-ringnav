@@ -262,6 +262,62 @@ m.top=oldtop; m.paint(w); assert m.selected(w)==10
 m.word(w+0x7c,1); m.word(w+0x80,0); rebind(w,0); m.paint(w)
 assert m.selected(w)==0; passed()
 
+# A recreated page recalls the last selected row and reveals it without a sacrificial press.
+m=Machine(); w=m.page(); m.word(w+0x0c,96); m.word(w+0x7c,1000)
+es=[m.entry(w,i*48) for i in range(10)]; m.nodes[w]['children']=es
+m.paint(w)
+for _ in range(5): assert m.call()==11
+assert m.selected(w)==5 and m.get(w+0x84)==192
+w2=m.page(); m.word(w2+0x0c,96); m.word(w2+0x7c,1000)
+es2=[m.entry(w2,i*48) for i in range(10)]; m.nodes[w2]['children']=es2
+assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+0x84)==192
+assert m.strokes[-2][:4]==(1,49,238,46)
+assert m.call(218)==11 and m.dispatched()[0][1]==es2[5]; passed()
+
+# Memory is per audited context: visiting another page leaves it alone.
+w3=m.page('display_page'); m.word(w3+0x0c,96); m.word(w3+0x7c,1000)
+es3=[m.entry(w3,i*48) for i in range(10)]; m.nodes[w3]['children']=es3
+assert m.paint(w3)==0 and m.selected(w3)==0
+w4=m.page(); m.word(w4+0x0c,96); m.word(w4+0x7c,1000)
+es4=[m.entry(w4,i*48) for i in range(10)]; m.nodes[w4]['children']=es4
+assert m.paint(w4)==0 and m.selected(w4)==5; passed()
+
+# A stale remembered row is ignored when the new list is shorter.
+w5=m.page(); m.word(w5+0x0c,96); m.word(w5+0x7c,300)
+es5=[m.entry(w5,i*48) for i in range(2)]; m.nodes[w5]['children']=es5
+assert m.paint(w5)==0 and m.selected(w5)==0
+assert m.call(218)==11 and m.dispatched()[0][1]==es5[0]; passed()
+
+# A settled swipe stores the row the user sees, not the pre-swipe selection.
+m=Machine(); w=m.page(); m.word(w+0x0c,96); m.word(w+0x7c,1000)
+es=[m.entry(w,i*48) for i in range(10)]; m.nodes[w]['children']=es
+m.paint(w); m.touch(); m.word(w+0x84,240); m.word(w+0xe8,0x1234)
+m.paint(w); assert m.selected(w)==0
+m.word(w+0xe8,0); m.paint(w); assert m.selected(w)==5
+w2=m.page(); m.word(w2+0x0c,96); m.word(w2+0x7c,1000)
+es2=[m.entry(w2,i*48) for i in range(10)]; m.nodes[w2]['children']=es2
+assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+0x84)==192; passed()
+
+# Virtual music tables recall a logical row and scroll to it on recreation.
+m=Machine(); w=m.page('allmusic_page','table_client')
+m.word(w+0x78,48); m.word(w+0x7c,20); m.word(w+0x0c,96)
+rows=[m.node('table_row') for _ in range(4)]
+entries=[m.entry(r) for r in rows]; m.nodes[w]['children']=rows
+for j,(r,e) in enumerate(zip(rows,entries)):
+    m.nodes[r]['children']=[e]; m.word(r+0x48,w); m.word(r+0x78,j); m.word(r+4,j*48)
+m.paint(w)
+for _ in range(2): assert m.call()==11
+assert m.selected(w)==2 and m.get(w+0x80)==48
+m.rebind=None
+w2=m.page('allmusic_page','table_client')
+m.word(w2+0x78,48); m.word(w2+0x7c,20); m.word(w2+0x0c,96)
+rows2=[m.node('table_row') for _ in range(4)]
+entries2=[m.entry(r) for r in rows2]; m.nodes[w2]['children']=rows2
+for j,(r,e) in enumerate(zip(rows2,entries2)):
+    m.nodes[r]['children']=[e]; m.word(r+0x48,w2); m.word(r+0x78,j); m.word(r+4,j*48)
+m.paint(w2); assert m.selected(w2)==2 and m.get(w2+0x80)==48
+assert m.call(218)==11 and m.dispatched()[0][1]==entries2[2]; passed()
+
 # Home keeps its native carousel presentation and value (including touch changes).
 m=Machine(); w=m.page('home_page','slide_menu'); m.word(w+0x78,1)
 child=[m.entry(w),m.entry(w)]; m.nodes[w]['children']=child

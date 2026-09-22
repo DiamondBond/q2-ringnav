@@ -11,12 +11,14 @@
 #define ACCEL_DIV 3
 #define ACCEL_MAX 8
 #define MAX_ENTRIES 256
+#define POS_MEM 64
 #define I(p, o) (*(int *)((char *)(p) + (o)))
 #define P(p, o) (*(void **)((char *)(p) + (o)))
 #define B(p, o) (*(unsigned char *)((char *)(p) + (o)))
 
 /* Writable state lives in the zero-filled page the builder maps past the payload text.
- * last_center arms the screen toggle pair; wheel_* scale repeated fast detents. */
+ * last_center arms the screen toggle pair; wheel_* scale repeated fast detents;
+ * pos_* remember the selected row per audited context across page recreation. */
 typedef struct {
     unsigned last_center; /* release time of the last selection press */
     void *center_top;     /* top window of that press */
@@ -24,16 +26,22 @@ typedef struct {
     unsigned last_wheel;  /* time of the previous wheel detent */
     int wheel_dir;        /* direction of that detent */
     unsigned wheel_run;   /* consecutive fast detents in that direction */
+    int pos_ctx[POS_MEM]; /* audited context index + 1, 0 when the slot is unused */
+    int pos_id[POS_MEM];  /* last selected logical row in that context */
+    unsigned pos_next;    /* round-robin victim once the table is full */
 } scratch_t;
 static scratch_t st __attribute__((section(".scratch")));
 
-static int allowed(const char *name) {
+/* Index of an audited top-window name, or -1. The index is remembered instead of the name
+ * pointer: AWTK owns and frees the window's name string. */
+static int context_id(const char *name) {
     static const char *const names[] = {
 #include "contexts.inc"
     };
+    if (!name) return -1;
     for (unsigned i = 0; i < sizeof(names) / sizeof(*names); ++i)
-        if (!tk_strcmp(name, names[i])) return 1;
-    return 0;
+        if (!tk_strcmp(name, names[i])) return (int)i;
+    return -1;
 }
 
 /* Only one visible navigation surface: never guess between two panes.
@@ -138,7 +146,7 @@ static int usable(void) {
 }
 
 static int allowed_top(void *top) {
-    return top && allowed(widget_get_prop_str(top, "name", (void *)0));
+    return top && context_id(widget_get_prop_str(top, "name", (void *)0)) >= 0;
 }
 
 /* One visible navigation surface under an already allowlisted top window. */
@@ -167,6 +175,38 @@ static int kind(void *w) {
 static void prop(void *w, const char *name, int value) {
     if (widget_get_prop_int(w, name, -1) != value) widget_set_prop_int(w, name, value);
 }
+
+static int *pos_slot(int ctx, int create) {
+    if (ctx < 0) return (void *)0;
+    for (int i = 0; i < POS_MEM; ++i)
+        if (st.pos_ctx[i] == ctx + 1) return &st.pos_id[i];
+    if (!create) return (void *)0;
+    unsigned i = st.pos_next++ % POS_MEM;
+    st.pos_ctx[i] = ctx + 1;
+    return &st.pos_id[i];
+}
+
+static int recall(int ctx) {
+    int *p = pos_slot(ctx, 0);
+    return p ? *p : -1;
+}
+
+/* Context of the active top window; every caller already holds a navigation surface. */
+static int context_now(void) {
+    void *top = window_manager_get_top_window(window_manager());
+    return top ? context_id(widget_get_prop_str(top, "name", (void *)0)) : -1;
+}
+
+/* Remember where the user was. Widget props die with a recreated page; this survives it. */
+static void select(void *w, int id) {
+    if (id >= 0) {
+        int *p = pos_slot(context_now(), 1);
+        if (p) *p = id;
+    }
+    prop(w, SEL, id);
+}
+
+static void reveal(menu_t *m, int id);
 
 static int load(menu_t *m, void *w) {
     m->w = w;
@@ -200,6 +240,14 @@ static int load(menu_t *m, void *w) {
     if (widget_get_prop_int(w, COUNT, -1) != m->rows) {
         prop(w, SEL, -1);
         prop(w, COUNT, m->rows);
+    }
+    /* A recreated page loses its widget properties; put the user back where they left off. */
+    if (m->kind != 3 && widget_get_prop_int(w, SEL, -1) < 0) {
+        int id = recall(context_now());
+        if (id >= 0 && id < m->rows) {
+            prop(w, SEL, id);
+            reveal(m, id);
+        }
     }
     return 1;
 }
@@ -238,6 +286,30 @@ static void stop_scroll(menu_t *m) {
     }
 }
 
+/* Least viewport move that makes logical row id fully visible; no animator if already visible. */
+static void reveal(menu_t *m, int id) {
+    int y, h;
+    if (m->kind == 2) {
+        y = id * m->row;
+        h = m->row;
+    } else {
+        int i = index_of(m, id);
+        if (i < 0) return;
+        rect_t r = bounds(m, i);
+        y = r.y + m->top;
+        h = r.h;
+    }
+    int want = y < m->top ? y : y + h > m->top + m->height ? y + h - m->height : m->top;
+    want = clamp_step(want, (m->kind == 2 ? m->rows * m->row : I(m->w, 0x7c)) - m->height, 0);
+    if (want == m->top) return;
+    if (m->kind == 2) {
+        stop_scroll(m);
+        table_client_scroll_to(m->w, want);
+    } else
+        scroll_view_scroll_delta_to(m->w, 0, want - m->top, GLIDE_MS);
+    m->top = want;
+}
+
 /* Keep selection during native momentum and wheel glides. Once settled, repair an offscreen
  * selection using the first fully visible target (partially visible only for oversized rows). */
 static int reconcile(menu_t *m, int settle) {
@@ -260,7 +332,7 @@ static int reconcile(menu_t *m, int settle) {
     } else if (id >= 0 && id < m->rows && !settle)
         return -1;
     cur = first >= 0 ? first : partial;
-    prop(m->w, SEL, cur >= 0 ? m->id[cur] : -1);
+    select(m->w, cur >= 0 ? m->id[cur] : -1);
     return cur;
 }
 
@@ -331,7 +403,7 @@ int ringnav_dispatch(void *target, void *event) {
         if (w && load(&m, w)) {
             int i = selects(&m, target);
             if (i >= 0) {
-                prop(w, SEL, m.id[i]);
+                select(w, m.id[i]);
                 widget_invalidate_force(w, (void *)0);
             }
         }
@@ -376,7 +448,7 @@ int ringnav(void *ctx, void *event) {
         st.center_surface = w;
         st.last_wheel = 0; /* A press ends any spin. */
         st.wheel_run = 0;
-        prop(w, SEL, m.id[cur]);
+        select(w, m.id[cur]);
         widget_invalidate_force(w, (void *)0);
         char click[0x30];
         /* Synchronous native click: no queued recycled row can change the activated item. */
@@ -409,7 +481,7 @@ int ringnav(void *ctx, void *event) {
         }
         int want = y < m.top ? y : y + h > m.top + m.height ? y + h - m.height : m.top;
         want = clamp_step(want, (m.kind == 2 ? m.rows * m.row : I(w, 0x7c)) - m.height, 0);
-        prop(w, SEL, next);
+        select(w, next);
         /* Reversing into the current viewport must cancel the previous glide away from it. */
         if (want == m.top && moving(&m)) stop_scroll(&m);
         if (want != m.top) {
