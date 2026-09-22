@@ -6,6 +6,7 @@
 #define KEY_PREV 172
 #define KEY_NEXT 173
 #define GLIDE_MS 300
+#define DOUBLE_CLICK_MS 400
 #define MAX_ENTRIES 256
 #define I(p, o) (*(int *)((char *)(p) + (o)))
 #define P(p, o) (*(void **)((char *)(p) + (o)))
@@ -99,6 +100,9 @@ static void *first_entry(void *w) {
 #define SEL "_ringnav_index"
 #define TOUCH "_ringnav_touch"
 #define COUNT "_ringnav_count"
+
+/* Release time of the last selection press; zero until the first click arms it. */
+static unsigned last_center __attribute__((section(".scratch")));
 
 typedef struct {
     int x, y, w, h;
@@ -312,12 +316,20 @@ int ringnav(void *ctx, void *event) {
     if (touch) stop_scroll(&m);
     int cur = reconcile(&m, touch || !moving(&m));
     if (!dir) {
+        unsigned now = (unsigned)time_now_ms();
+        if (last_center && now - last_center <= DOUBLE_CLICK_MS) {
+            last_center = 0;
+            /* Second release of a double click: the stock short press toggles the screen. */
+            return result;
+        }
         if (cur < 0) return STOP;
+        last_center = now;
         char click[0x30];
         /* Synchronous native click: no queued recycled row can change the activated item. */
         ringnav_dispatch(m.at[cur], pointer_event_init(click, EVT_CLICK, m.at[cur], 0, 0));
         return STOP; /* No widget access after the app callback. */
     }
+    last_center = 0; /* A wheel detent ends the double-click window. */
     prop(w, TOUCH, 0);
     if (m.kind == 3) {
         if (dir > 0)

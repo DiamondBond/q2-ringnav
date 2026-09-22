@@ -5,6 +5,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 ZIP_SHA = '154c17822d09be001be35c03d2d3488424dee195221790bd70864480d55b0f00'
 DEMO_SHA = '2c5f06142850b4fc168f82b44a81550cce0a5b4b9fe1c179dced4a08a3049138'
 BASE = 0xb00000
+SCRATCH = 0xb0f000
 HOOK = 0x4e85c8
 HOOKS = {
     'on_wm_keyup_before_fun': (HOOK, 'ringnav'),
@@ -58,6 +59,7 @@ FUNCTIONS = {
  'canvas_set_stroke_color': ('int', 'void *, unsigned'),
  'canvas_stroke_rect': ('int', 'void *, int, int, int, int'),
  'pointer_event_init': ('void *', 'void *, int, void *, int, int'),
+ 'time_now_ms': ('unsigned', 'void'),
  'slide_menu_scroll_to_next': ('int', 'void *'),
  'slide_menu_scroll_to_prev': ('int', 'void *'),
  'table_client_stop_animator_scroll': ('int', 'void *'),
@@ -113,7 +115,8 @@ def build(zip_path, out, step):
     run('llvm-objcopy','-O','binary',out/'patch.elf',out/'patch.bin')
     payload = (out/'patch.bin').read_bytes()
     ps = symbols(out/'patch.elf')
-    check(len(payload) < 65536, 'Unexpected patch size')
+    check(len(payload) < SCRATCH-BASE, 'Payload overlaps its scratch page')
+    check(ps['last_center'] == SCRATCH, 'Scratch cell moved')
     patched = bytearray(raw_demo)
     hookoff = fileoff(patched, HOOK)
     hooks = {}
@@ -130,14 +133,14 @@ def build(zip_path, out, step):
         hooks[name] = dict(address=hex(address), replacement=replacement, original=raw_demo[off:off+12].hex())
     # Single shared version literal: About display and updater equality check.
     check(patched.count(b'V1.32\0') == 1, 'Version literal is not unique')
-    patched = patched.replace(b'V1.32\0', b'V1.6R\0')
+    patched = patched.replace(b'V1.32\0', b'V1.7R\0')
     nulls = [(o,p) for o,p in segments(patched) if p[0] == 0]
     check(len(nulls) == 1 and nulls[0][0] == segments(patched)[-1][0], 'No final PT_NULL slot')
     check(all(p[2]+p[5] < BASE for _,p in segments(patched) if p[0] == 1), 'Patch mapping overlaps')
     appendoff = (len(patched)+65535)&~65535
     patched.extend(bytes(appendoff-len(patched)))
     patched.extend(payload)
-    struct.pack_into('<8I',patched,nulls[0][0],1,appendoff,BASE,BASE,len(payload),len(payload),5,65536)
+    struct.pack_into('<8I',patched,nulls[0][0],1,appendoff,BASE,BASE,len(payload),SCRATCH-BASE+4,7,65536)
     (out/'demo').write_bytes(patched)
     (out/'patch.dis').write_text(run('llvm-objdump','-d',out/'patch.elf'))
     # Pseudo-file round trip preserves every original inode's metadata and hardlinks.
@@ -169,7 +172,7 @@ def build(zip_path, out, step):
     blobs['recovery-update/rootfs.squashfs'] = newsq.read_bytes()
     # Stock image proves this size fits; do not enlarge beyond its padded size.
     check(len(blobs['recovery-update/rootfs.squashfs']) <= sq.stat().st_size, 'Repacked rootfs exceeds stock size')
-    blobs['firmware_v20.info'] = ('Shanling Q2\nV1.6R\n'+''.join(
+    blobs['firmware_v20.info'] = ('Shanling Q2\nV1.7R\n'+''.join(
         hashlib.md5(blobs[n]).hexdigest()+'  '+n+'\n' for n in [
             'recovery-update/xImage','recovery-update/rootfs.squashfs'])).encode()
     with tarfile.open(out/'update.tar','w',format=tarfile.GNU_FORMAT) as t:
@@ -182,7 +185,7 @@ def build(zip_path, out, step):
         rootfs_sha256=sha(newsq.read_bytes()), kernel_sha256=sha(blobs['recovery-update/xImage']),
         hook_address=hex(HOOK), hook_file_offset=hex(hookoff), patch_address=hex(BASE),
         patch_file_offset=hex(appendoff), patch_bytes=len(payload), ring_step_pixels=step,
-        version='V1.6R', hooks=hooks,
+        version='V1.7R', hooks=hooks,
         patch_symbols={n:hex(v) for n,v in ps.items() if n.startswith('stock_')},
         tools={t:run(t,'--version').splitlines()[0] for t in ['clang','ld.lld','llvm-objcopy']})
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')

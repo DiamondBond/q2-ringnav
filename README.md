@@ -4,7 +4,7 @@ Firmware mod for the Shanling Q2 that lets you use the scroll wheel to move thro
 
 The touchscreen still works normally. Outside supported menus, the wheel still controls volume and the other buttons keep their normal behaviour.
 
-**Latest firmware: V1.6R**
+**Latest firmware: V1.7R**
 
 [**Download the latest release**](https://github.com/DiamondBond/q2-ringnav/releases/latest)
 
@@ -14,7 +14,7 @@ The touchscreen still works normally. Outside supported menus, the wheel still c
 2. Unzip it and copy `update.bin` to the root of your microSD card.
 3. On the Q2, go to **System settings → System Update → TF card update**.
 4. Confirm the update and wait for the player to restart.
-5. Check **About** and make sure it shows `V1.6R`.
+5. Check **About** and make sure it shows `V1.7R`.
 
 Make sure the Q2 is charged before updating, and don't remove the microSD card while the update is running.
 
@@ -28,6 +28,7 @@ To go back to stock, just flash the official Shanling Q2 V1.32 firmware again.
 
 - Turn the scroll wheel to move through menu items.
 - Short press the centre button to open the highlighted item.
+- Double-press the centre button to turn the screen off and on again, the way the stock short press did.
 - Tap and swipe still work normally.
 - Turning the wheel during a swipe stops the scrolling and takes over again.
 - Outside supported menus, the wheel goes back to normal volume control.
@@ -35,7 +36,7 @@ To go back to stock, just flash the official Shanling Q2 V1.32 firmware again.
 
 The selected item gets a small white outline so you can see what will open when you press the centre button. The home screen keeps its normal selected-card look without the extra outline.
 
-V1.5R was tested on real Q2 hardware and confirmed working for highlighting, centre-button selection and music selection. V1.6R removes the unnecessary highlight box from the home screen.
+V1.5R was tested on real Q2 hardware and confirmed working for highlighting, centre-button selection and music selection. V1.6R removes the unnecessary highlight box from the home screen. V1.7R adds the centre double-press screen toggle described above.
 
 If you find a menu where something behaves strangely, please open an issue and say which screen you were on and what you did.
 
@@ -45,7 +46,7 @@ If you find a menu where something behaves strangely, please open an issue and s
 
 Only `release/bin/demo` inside `rootfs.squashfs` changes. The kernel is byte-identical, and the builder checks every other inode's name, type, mtime, mode, uid and gid against stock.
 
-Four checked MIPS prologues redirect into a read/execute payload at `0xb00000`, using the final unused `PT_NULL` program header. Trampolines restore the stock GOT base and resume each original function after its PIC setup:
+Four checked MIPS prologues redirect into a payload at `0xb00000`, using the final unused `PT_NULL` program header. Trampolines restore the stock GOT base and resume each original function after its PIC setup:
 
 | Stock callback            | Address    | Purpose                                                       |
 | ------------------------- | ---------- | ------------------------------------------------------------- |
@@ -55,6 +56,8 @@ Four checked MIPS prologues redirect into a read/execute payload at `0xb00000`, 
 | `widget_dispatch`         | `0x65e0ec` | Observe a native click before its app callback changes the UI |
 
 Selection is stored in widget-owned integer properties on the navigation surface, independently of AWTK's focused flag. The outline and centre action resolve that same logical selection against the current entries. Centre dispatches a synchronous native `EVT_CLICK`, so a queued click cannot hit a row rebound between selection and delivery. It never dereferences the target after delivery.
+
+A centre release within 400 ms of the previous one is handed back to the stock key-up chain, whose short press toggles the screen through `screen_action`; the first press of the pair still opens the highlighted item. The payload maps its 64K window read/write and keeps the last release time in a zero-filled scratch cell at `0xb0f000`. A wheel detent clears the window.
 
 The canvas hook intersects the existing clip with the viewport and restores both clip and stroke color; this firmware's `canvas_save/restore` do not save those properties.
 
@@ -77,7 +80,7 @@ python3 tools/test_patch.py /tmp/q2-build  # requires unicorn==2.1.4
 
 The suite executes the actual patched MIPS payload and stock key/touch filters. UI services are mocked; a separate scenario executes the stock canvas clip/color/rectangle code down to a mocked LCD sink.
 
-Checks cover touch reselection, gesture suppression, momentum handoff, interrupted and reversed wheel glides, recycled rows, menu return, count changes, empty/oversized rows, preserved Play/Pause, power-release exclusions and stock key-lock parity. Every call checks preserved registers/stack, and native calls check the PIC `$t9` convention.
+Checks cover touch reselection, gesture suppression, momentum handoff, interrupted and reversed wheel glides, recycled rows, menu return, count changes, empty/oversized rows, preserved Play/Pause, power-release exclusions, the double-press window and stock key-lock parity. Every call checks preserved registers/stack, and native calls check the PIC `$t9` convention.
 
 Two fresh builds must produce identical `update.tar` files. Packaging verifies MD5 entries, unchanged kernel and rootfs metadata, and a rootfs no larger than stock.
 
@@ -90,6 +93,8 @@ Before distributing a build as hardware-verified, check a Q2 on Home, Local Song
 - swipe → wheel during momentum
 - rapid wheel reversals
 - return from a submenu
+- double-press centre → screen off, then centre → wake
+- single centre press → select, with no screen change
 - screen-off wake
 - Play/Pause
 - long-press power

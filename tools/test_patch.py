@@ -24,14 +24,14 @@ class Machine:
             start=v&~4095; end=(v+m+4095)&~4095
             self.u.mem_map(start,end-start)
             self.u.mem_write(v,data[o:o+f])
-            # Protect the injected executable payload from accidental data writes.
-            if v==0xb00000: self.u.mem_protect(start,end-start,5)
+            # Payload text is execute-only; its top page holds the scratch cell.
+            if v==0xb00000: self.u.mem_protect(start,0xb0f000-start,5)
         self.u.mem_map(0x1000000,0x200000)
         self.u.mem_map(0x70000000,0x10000)
         self.next=0x1001000; self.nodes={}; self.calls=[]; self.animating=0; self.pressed=0
         self.top=0; self.wm=0x1000000; self.event=0x1000100
         self.strokes=[]; self.rebind=None; self.on_click=None; self.glide=True
-        self.canvas=0x1000200; self.lcd=0x1000300
+        self.canvas=0x1000200; self.lcd=0x1000300; self.now=1000
         self.word(self.canvas+0x38,self.lcd)
         self.word(self.lcd+0xc0,0x12345678)
         self.clip=(0,0,240,240)
@@ -97,6 +97,7 @@ class Machine:
         elif name=='widget_set_prop_int': n[self.text(b)]=signed(c); ret=0
         elif name=='pointer_event_init':
             self.word(a,b); self.word(a+0x10,c); ret=a
+        elif name=='time_now_ms': ret=self.now
         elif name=='stock_dispatch':
             if self.on_click: self.on_click(a,b)
             ret=0
@@ -127,8 +128,9 @@ class Machine:
             u.reg_write(r,0xdeadbeef)
         u.reg_write(UC_MIPS_REG_V0,ret&0xffffffff)
         u.reg_write(UC_MIPS_REG_PC,u.reg_read(UC_MIPS_REG_RA))
-    def call(self,key=173,address=HOOK,args=None,event_type=0x114):
+    def call(self,key=173,address=HOOK,args=None,event_type=0x114,gap=1000):
         # Independent input steps occur after the stock key debounce timer expires.
+        self.now+=gap
         self.byte(0xa37c89,0)
         self.calls=[]; self.word(self.event+0x18,key)
         self.word(self.event,event_type)
@@ -267,6 +269,22 @@ assert m.call(218)==11 and m.dispatched()[0][1]==child[0]; passed()
 # Long-press/boot release must reach stock cleanup, never activate a menu item.
 for addr in [syms['g_power_longkey'],syms['g_ingore_bootkey_flag'],0xa37c8a]:
     m.byte(addr,1); assert m.call(218)==0 and not m.dispatched(); m.byte(addr,0); passed()
+# A quick second centre release reaches stock, whose short press toggles the screen.
+m=Machine(); w=m.page(); m.word(w+0x0c,96)
+es=[m.entry(w,i*48) for i in range(3)]; m.nodes[w]['children']=es
+assert m.call(218)==11 and len(m.dispatched())==1
+assert m.call(218,gap=100)==0 and not m.dispatched()
+assert m.call(218,gap=100)==11 and len(m.dispatched())==1; passed()
+# A wheel detent ends the double-click window: the next press selects instead.
+m=Machine(); w=m.page(); m.word(w+0x0c,96)
+es=[m.entry(w,i*48) for i in range(3)]; m.nodes[w]['children']=es
+assert m.call(218)==11 and len(m.dispatched())==1
+m.call(gap=50)
+assert m.call(218,gap=50)==11 and len(m.dispatched())==1; passed()
+# An empty menu consumes both presses; the window only arms after a real click.
+m=Machine(); w=m.page()
+assert m.call(218)==11 and not m.dispatched()
+assert m.call(218,gap=100)==11 and not m.dispatched(); passed()
 # Real canvas ABI, translation and clip code execute; only the LCD rectangle sink is mocked.
 m=Machine(); w=m.page(); m.word(w+0x0c,96)
 e=m.entry(w,48); m.nodes[w]['children']=[e]

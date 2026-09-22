@@ -1,18 +1,18 @@
 {
   "input_zip_sha256": "154c17822d09be001be35c03d2d3488424dee195221790bd70864480d55b0f00",
   "stock_demo_sha256": "2c5f06142850b4fc168f82b44a81550cce0a5b4b9fe1c179dced4a08a3049138",
-  "demo_sha256": "68a617651db3347c818a5d66d3784303fe8aaa24c68125ddbdd6b977dd2f879e",
-  "patch_sha256": "53232ff5beec2827982472996ea442b888ef33b74ddb9382ef6aa904b1c17de6",
-  "update_sha256": "7cb873b7c4908883848e4b99e1cec7f5510864846d289cf7105bcb45cc9c13ab",
-  "rootfs_sha256": "f7b5c082fc47427b5f71d8ae1ad834c514f9424089effb9a5dc079ea832f13d2",
+  "demo_sha256": "e9ca8d2d16e439dadd98036e07da45d50e43e7d4ea7733ab319f71918b7aeb9d",
+  "patch_sha256": "17d863e158106e7681b9204cc64bb49d27ced164c08c82880e20debecbb11baf",
+  "update_sha256": "a4f597547538019fa997121e5e930b75005918a7b854871b6fa4c6f8bf0a3bbd",
+  "rootfs_sha256": "c225b61e800941a2877047dae6edf8ba26977991907de4e6b56ebedc9547a16e",
   "kernel_sha256": "39d54b09109db2b8fe9a975e3b24a0d105ef0b51a6708601af64aaa5186e11bc",
   "hook_address": "0x4e85c8",
   "hook_file_offset": "0xe85c8",
   "patch_address": "0xb00000",
   "patch_file_offset": "0x690000",
-  "patch_bytes": 8024,
+  "patch_bytes": 8104,
   "ring_step_pixels": 48,
-  "version": "V1.6R",
+  "version": "V1.7R",
   "hooks": {
     "on_wm_keyup_before_fun": {
       "address": "0x4e85c8",
@@ -36,19 +36,19 @@
     }
   },
   "patch_symbols": {
-    "stock_paint_trampoline": "0xb01a70",
-    "stock_touch_trampoline": "0xb01a60",
-    "stock_dispatch_trampoline": "0xb01a80",
-    "stock_keyup_trampoline": "0xb01a50"
+    "stock_paint_trampoline": "0xb01ac0",
+    "stock_touch_trampoline": "0xb01ab0",
+    "stock_dispatch_trampoline": "0xb01ad0",
+    "stock_keyup_trampoline": "0xb01aa0"
   },
   "tools": {
     "clang": "clang version 22.1.8",
     "ld.lld": "LLD 22.1.8 (compatible with GNU linkers)",
     "llvm-objcopy": "llvm-objcopy, compatible with GNU objcopy"
   },
-  "zip_sha256": "8bc4e55c726c0d1f180ae57077683da55c58cfe4130c9a916bbfdddd840ae7bb",
+  "zip_sha256": "e31239845dc60cf63da7fcb214a52e465d33ed55c526bd9dff794bc1525a7625",
   "validation": {
-    "mips_scenarios": 124,
+    "mips_scenarios": 127,
     "reproducible_update": true,
     "hardware_tested": false
   }
