@@ -98,6 +98,7 @@ class Machine:
         elif name=='pointer_event_init':
             self.word(a,b); self.word(a+0x10,c); ret=a
         elif name=='time_now_ms': ret=self.now
+        elif name=='tk_strcmp': ret=0 if a and b and self.text(a)==self.text(b) else -1
         elif name=='stock_dispatch':
             if self.on_click: self.on_click(a,b)
             ret=0

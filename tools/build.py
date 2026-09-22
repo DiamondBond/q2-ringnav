@@ -6,6 +6,7 @@ ZIP_SHA = '154c17822d09be001be35c03d2d3488424dee195221790bd70864480d55b0f00'
 DEMO_SHA = '2c5f06142850b4fc168f82b44a81550cce0a5b4b9fe1c179dced4a08a3049138'
 BASE = 0xb00000
 SCRATCH = 0xb0f000
+RING_STEP = 48
 HOOK = 0x4e85c8
 HOOKS = {
     'on_wm_keyup_before_fun': (HOOK, 'ringnav'),
@@ -60,6 +61,7 @@ FUNCTIONS = {
  'canvas_stroke_rect': ('int', 'void *, int, int, int, int'),
  'pointer_event_init': ('void *', 'void *, int, void *, int, int'),
  'time_now_ms': ('unsigned', 'void'),
+ 'tk_strcmp': ('int', 'const char *, const char *'),
  'slide_menu_scroll_to_next': ('int', 'void *'),
  'slide_menu_scroll_to_prev': ('int', 'void *'),
  'table_client_stop_animator_scroll': ('int', 'void *'),
@@ -92,11 +94,8 @@ def build(zip_path, out):
     check(sha(raw_demo) == DEMO_SHA, 'Unsupported demo binary')
     demo = out/'stock-demo'; demo.write_bytes(raw_demo)
     syms = symbols(demo)
-    check(syms['on_wm_keyup_before_fun'] == HOOK, 'Callback address mismatch')
-    header = ['#define RING_STEP 48',
-              'extern int stock_keyup_trampoline(void *, void *);',
-              '#define stock_keyup stock_keyup_trampoline']
-    for name in ('touch', 'paint', 'dispatch'):
+    header = [f'#define RING_STEP {RING_STEP}']
+    for name in ('keyup', 'touch', 'paint', 'dispatch'):
         header += [f'extern int stock_{name}_trampoline(void *, void *);',
                    f'#define stock_{name} stock_{name}_trampoline']
     for name,(ret,args) in FUNCTIONS.items():
@@ -184,7 +183,7 @@ def build(zip_path, out):
         demo_sha256=sha(patched), patch_sha256=sha(payload), update_sha256=sha((out/'update.tar').read_bytes()),
         rootfs_sha256=sha(newsq.read_bytes()), kernel_sha256=sha(blobs['recovery-update/xImage']),
         hook_address=hex(HOOK), hook_file_offset=hex(hookoff), patch_address=hex(BASE),
-        patch_file_offset=hex(appendoff), patch_bytes=len(payload), ring_step_pixels=48,
+        patch_file_offset=hex(appendoff), patch_bytes=len(payload), ring_step_pixels=RING_STEP,
         version='V1.7R', hooks=hooks,
         patch_symbols={n:hex(v) for n,v in ps.items() if n.startswith('stock_')},
         tools={t:run(t,'--version').splitlines()[0] for t in ['clang','ld.lld','llvm-objcopy']})

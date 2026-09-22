@@ -12,21 +12,12 @@
 #define P(p, o) (*(void **)((char *)(p) + (o)))
 #define B(p, o) (*(unsigned char *)((char *)(p) + (o)))
 
-static int eq(const char *a, const char *b) {
-    if (!a || !b) return 0;
-    while (*a && *a == *b) {
-        ++a;
-        ++b;
-    }
-    return *a == *b;
-}
-
 static int allowed(const char *name) {
     static const char *const names[] = {
 #include "contexts.inc"
     };
     for (unsigned i = 0; i < sizeof(names) / sizeof(*names); ++i)
-        if (eq(name, names[i])) return 1;
+        if (!tk_strcmp(name, names[i])) return 1;
     return 0;
 }
 
@@ -39,12 +30,13 @@ static void find_surface(void *w, void **found, int *count, int depth, int *budg
         return;
     }
     const char *type = widget_get_type(w);
-    if (eq(type, "scroll_view") || eq(type, "table_client") || eq(type, "slide_menu")) {
+    if (!tk_strcmp(type, "scroll_view") || !tk_strcmp(type, "table_client") ||
+        !tk_strcmp(type, "slide_menu")) {
         *found = w;
         ++*count;
         return;
     }
-    if (eq(type, "pages")) {
+    if (!tk_strcmp(type, "pages")) {
         int active = widget_get_prop_int(w, "active", -1);
         if (active >= 0) find_surface(widget_get_child(w, active), found, count, depth + 1, budget);
         return;
@@ -56,10 +48,8 @@ static void find_surface(void *w, void **found, int *count, int depth, int *budg
 
 static int clamp_step(int offset, int maximum, int delta) {
     if (maximum < 0) maximum = 0;
-    if (offset < 0) offset = 0;
-    if (offset > maximum) offset = maximum;
-    if (delta > 0) return maximum - offset < delta ? maximum : offset + delta;
-    return offset < -delta ? 0 : offset + delta;
+    int next = (offset < 0 ? 0 : offset > maximum ? maximum : offset) + delta;
+    return next < 0 ? 0 : next > maximum ? maximum : next;
 }
 
 /* A tap target has an EVT_CLICK handler. V1.32 widget emitter @0x60; emitter_on_with_tag items are
@@ -131,9 +121,9 @@ static void *surface(void) {
 
 static int kind(void *w) {
     const char *t = widget_get_type(w);
-    if (eq(t, "slide_menu")) return 3;
-    if (eq(t, "table_client")) return 2;
-    return eq(t, "scroll_view") && B(w, 0x91) && !B(w, 0x92) ? 1 : 0;
+    if (!tk_strcmp(t, "slide_menu")) return 3;
+    if (!tk_strcmp(t, "table_client")) return 2;
+    return !tk_strcmp(t, "scroll_view") && B(w, 0x91) && !B(w, 0x92) ? 1 : 0;
 }
 
 static void prop(void *w, const char *name, int value) {
