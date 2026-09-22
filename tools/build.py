@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Reproducibly patch only the audited Q2 V1.32 ZIP. Requires LLVM and squashfs-tools.
 
---logo swaps the boot splash JPEG (320x375) in the repacked rootfs.
+--logo swaps the boot splash JPEG (320x375); it defaults to assets/logo.jpg.
 """
 import argparse, hashlib, io, json, pathlib, re, struct, subprocess, tarfile, zipfile
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -26,8 +26,8 @@ def sha(b): return hashlib.sha256(b).hexdigest()
 def source_sha256():
     """Hash every build input, so a test run cannot silently use a stale output directory."""
     h = hashlib.sha256()
-    for rel in ['patch/contexts.inc', 'patch/link.ld', 'patch/offsets.inc', 'patch/ringnav.c',
-                'patch/trampoline.S', 'tools/build.py']:
+    for rel in ['assets/logo.jpg', 'patch/contexts.inc', 'patch/link.ld', 'patch/offsets.inc',
+                'patch/ringnav.c', 'patch/trampoline.S', 'tools/build.py']:
         h.update(rel.encode() + b'\0')
         h.update((ROOT/rel).read_bytes())
     return h.hexdigest()
@@ -271,6 +271,7 @@ if __name__ == '__main__':
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('zip',type=pathlib.Path)
     ap.add_argument('--out',type=pathlib.Path,default=ROOT/'build')
-    ap.add_argument('--logo',type=pathlib.Path,help='320x375 JPEG boot splash')
+    ap.add_argument('--logo',type=pathlib.Path,default=ROOT/'assets/logo.jpg',
+                    help='320x375 JPEG boot splash (default: assets/logo.jpg)')
     a=ap.parse_args()
     build(a.zip,a.out.resolve(),a.logo)

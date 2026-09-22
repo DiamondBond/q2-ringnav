@@ -10,10 +10,10 @@ The Q2 splash shown on the screen at power-on is a JPEG inside the rootfs. There
 
 ## Build an update with a custom logo
 
-Pass a 320x375 JPEG to the normal build:
+Every build replaces the splash with `assets/logo.jpg`. Pass another 320x375 JPEG with `--logo` to use your own:
 
 ```sh
-python3 tools/build.py 'Q2 Firmware V1.32.zip' --out /tmp/q2-logo --logo assets/logo.jpg
+python3 tools/build.py 'Q2 Firmware V1.32.zip' --out /tmp/q2-logo --logo my-logo.jpg
 ```
 
 Flash `/tmp/q2-logo/update.tar` the normal way: copy it to the root of the microSD card, then **System settings → System Update → TF card update**. The update keeps the scroll-wheel patch, and **About** still shows the version from the build (currently `V1.9R`).
@@ -28,7 +28,7 @@ To check what landed in the image:
 
 ```sh
 unsquashfs -cat /tmp/q2-logo/rootfs.squashfs release/assets/default/raw/images/xx/logo.jpg | sha256sum
-sha256sum assets/logo.jpg
+sha256sum my-logo.jpg
 ```
 
 ## Notes

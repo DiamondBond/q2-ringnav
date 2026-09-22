@@ -26,7 +26,7 @@ To go back to stock, just flash the official Shanling Q2 V1.32 firmware again.
 
 ## Custom boot logo
 
-The boot splash can be replaced when building your own firmware — see [docs/boot-logo.md](docs/boot-logo.md). `assets/logo.jpg` is a ready-to-use example.
+Rebuilt firmware uses `assets/logo.jpg` as the boot splash by default. Pass another 320x375 JPEG with `--logo` to use your own — see [docs/boot-logo.md](docs/boot-logo.md).
 
 ## Controls
 
@@ -47,7 +47,7 @@ If you find a menu where something behaves strangely, please open an issue and s
 
 ## Changelog
 
-- **V1.9R**: The selection outline is now one crisp white line over a dark separator and the subtle dark fill, so it stays readable over bright album art. A canvas that declines rounded drawing keeps the square outline.
+- **V1.9R**: The selection outline is now one crisp white line over a dark separator and the subtle dark fill, so it stays readable over bright album art. A canvas that declines rounded drawing keeps the square outline. New builds also ship the custom boot splash (`assets/logo.jpg`) by default.
 - **V1.8R**: Wheel acceleration, gliding music tables, a scoped double-press screen toggle, nested tap-target selection, per-context position memory with row-text identity, multi-pane surface selection, a centre-nearest swipe settle and a build-time context audit.
 - **V1.7R**: Added centre button double-press to toggle the screen on/off.
 - **V1.6R**: Home screen now keeps the stock selected-card highlight without any extra outline.
