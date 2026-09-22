@@ -1,51 +1,51 @@
-# Q2 ring navigation (V1.32 → V1.6R)
+# Shanling Q2 Scroll Wheel Navigation
 
-Adds wheel selection to Shanling Q2 menus while keeping native touchscreen navigation.
+Firmware mod for the Shanling Q2 that lets you use the scroll wheel to move through menus and press the centre button to select things.
 
-Release candidate: `dist/Q2 Firmware V1.6R.zip` (same layout as the stock ZIP).
-Device feedback on V1.5R confirms centre selection, highlighting and music selection work.
-V1.6R removes the unnecessary outline from the home carousel.
+The touchscreen still works normally. Outside supported menus, the wheel still controls volume and the other buttons keep their normal behaviour.
+
+**Latest firmware: V1.6R**
+
+[**Download the latest release**](https://github.com/DiamondBond/q2-ringnav/releases/latest)
+
+## Install
+
+1. Download the firmware ZIP from the latest release.
+2. Unzip it and copy `update.bin` to the root of your microSD card.
+3. On the Q2, go to **System settings → System Update → TF card update**.
+4. Confirm the update and wait for the player to restart.
+5. Check **About** and make sure it shows `V1.6R`.
+
+Make sure the Q2 is charged before updating, and don't remove the microSD card while the update is running.
+
+This is for the **Shanling Q2 on stock V1.32 firmware**.
+
+To go back to stock, just flash the official Shanling Q2 V1.32 firmware again.
+
+[Shanling Q2 official firmware](https://en.shanling.com/download/150)
 
 ## Controls
 
-- Lists show a two-pixel white outline around the selected entry, independent of the red
-  currently-playing indication and native touch focus. Selection initializes on the first paint.
-  The home carousel keeps its native selected-card appearance without an added outline.
-- Turning the ring moves one entry at a time and keeps it visible. Ordinary lists use the stock
-  300 ms glide; recycled `table_client` rows use immediate scrolling and logical row indices.
-- A short centre press opens the selected entry. This uses key **218**, the stock screen-toggle
-  key, rather than key 171 (the separate Play/Pause action used incorrectly by V1.4R).
-- Tapping another entry updates selection **before** its native action runs. If the tap leaves
-  the menu open, centre opens the entry just tapped. No extra tap is required.
-- Swiping keeps native scrolling and momentum. Selection survives while visible; after settling,
-  an offscreen selection moves to the first fully visible selectable entry. Oversized entries
-  fall back to the first partially visible one.
-- Turning the wheel during touch momentum stops it at its current position and resumes menu
-  navigation. Wheel and centre input during an active finger gesture are consumed without
-  queuing an action. Touch-down interrupts an outstanding wheel glide.
-- Returning to a surviving menu preserves a valid selection. Recreated menus start with their
-  first visible entry; changing the entry count resets selection. No widget pointers survive
-  between events, so recycled table rows cannot carry selection to an unrelated logical row.
-- Outside supported menus, centre retains stock screen toggle and the wheel retains stock volume
-  behavior. Play/Pause and long-press power behavior remain stock. Empty supported menus consume
-  centre without opening anything or turning the screen off.
+- Turn the scroll wheel to move through menu items.
+- Short press the centre button to open the highlighted item.
+- Tap and swipe still work normally.
+- Turning the wheel during a swipe stops the scrolling and takes over again.
+- Outside supported menus, the wheel goes back to normal volume control.
+- Play/Pause and long-press power are unchanged.
 
-## Install and compatibility
+The selected item gets a small white outline so you can see what will open when you press the centre button. The home screen keeps its normal selected-card look without the extra outline.
 
-Install like a stock update. Flash stock V1.32 to revert. The About screen and updater share the
-`V1.6R` version literal; changing it allows installation over V1.5R, since the updater refuses an
-identical version label. Only the audited V1.32 base firmware is supported.
+V1.5R was tested on real Q2 hardware and confirmed working for highlighting, centre-button selection and music selection. V1.6R removes the unnecessary highlight box from the home screen.
 
-Release hashes and build details are in `dist/manifest.json`.
+If you find a menu where something behaves strangely, please open an issue and say which screen you were on and what you did.
 
-## Implementation
+---
 
-Only `release/bin/demo` inside `rootfs.squashfs` changes. The kernel is byte-identical, and the
-builder checks every other inode's name, type, mtime, mode, uid and gid against stock.
+# Technical details
 
-Four checked MIPS prologues redirect into a read/execute payload at `0xb00000`, using the final
-unused `PT_NULL` program header. Trampolines restore the stock GOT base and resume each original
-function after its PIC setup:
+Only `release/bin/demo` inside `rootfs.squashfs` changes. The kernel is byte-identical, and the builder checks every other inode's name, type, mtime, mode, uid and gid against stock.
+
+Four checked MIPS prologues redirect into a read/execute payload at `0xb00000`, using the final unused `PT_NULL` program header. Trampolines restore the stock GOT base and resume each original function after its PIC setup:
 
 | Stock callback            | Address    | Purpose                                                       |
 | ------------------------- | ---------- | ------------------------------------------------------------- |
@@ -54,40 +54,44 @@ function after its PIC setup:
 | `widget_on_paint_border`  | `0x6596a0` | Draw the selected entry outline after native children         |
 | `widget_dispatch`         | `0x65e0ec` | Observe a native click before its app callback changes the UI |
 
-Selection is stored in widget-owned integer properties on the navigation surface, independently
-of AWTK's focused flag. The outline and centre action resolve that same logical selection against
-the current entries. Centre dispatches a synchronous native `EVT_CLICK`, so a queued click cannot
-hit a row rebound between selection and delivery. It never dereferences the target after delivery.
-The canvas hook intersects the existing clip with the viewport and restores both clip and stroke
-color; this firmware's `canvas_save/restore` do not save those properties.
+Selection is stored in widget-owned integer properties on the navigation surface, independently of AWTK's focused flag. The outline and centre action resolve that same logical selection against the current entries. Centre dispatches a synchronous native `EVT_CLICK`, so a queued click cannot hit a row rebound between selection and delivery. It never dereferences the target after delivery.
 
-Navigation requires a supported top-window name from `patch/contexts.inc`, screen-on and no
-lock/test/guide/power-off/USB-link/Bluetooth-receive screen, and exactly one visible enabled
-navigation surface. Only active `pages` children are searched. Horizontal and page-snapping scroll
-views remain native. The bounded walk collects at most 256 targets in a non-virtual list; virtual
-music tables navigate by total logical row count instead.
+The canvas hook intersects the existing clip with the viewport and restores both clip and stroke color; this firmware's `canvas_save/restore` do not save those properties.
+
+Navigation requires a supported top-window name from `patch/contexts.inc`, screen-on and no lock/test/guide/power-off/USB-link/Bluetooth-receive screen, and exactly one visible enabled navigation surface. Only active `pages` children are searched. Horizontal and page-snapping scroll views remain native. The bounded walk collects at most 256 targets in a non-virtual list; virtual music tables navigate by total logical row count instead.
 
 ## Build and validation
 
 Requires clang/lld/llvm-objcopy, squashfs-tools 4.7 (tested 4.7.5), and the original ZIP:
-`154c17822d09be001be35c03d2d3488424dee195221790bd70864480d55b0f00` (SHA-256).
+
+```text
+154c17822d09be001be35c03d2d3488424dee195221790bd70864480d55b0f00
+```
+
+SHA-256 of the stock Shanling Q2 V1.32 firmware ZIP.
 
 ```sh
 python3 tools/build.py 'Q2 Firmware V1.32.zip' --out /tmp/q2-build
 python3 tools/test_patch.py /tmp/q2-build  # requires unicorn==2.1.4
 ```
 
-The suite executes the actual patched MIPS payload and stock key/touch filters. UI services are
-mocked; a separate scenario executes the stock canvas clip/color/rectangle code down to a mocked
-LCD sink. Checks cover touch reselection, gesture suppression, momentum handoff, interrupted and
-reversed wheel glides, recycled rows, menu return, count changes, empty/oversized rows, preserved
-Play/Pause, power-release exclusions and stock key-lock parity. Every call checks preserved
-registers/stack, and native calls check the PIC `$t9` convention.
+The suite executes the actual patched MIPS payload and stock key/touch filters. UI services are mocked; a separate scenario executes the stock canvas clip/color/rectangle code down to a mocked LCD sink.
 
-Two fresh builds must produce identical `update.tar` files. Packaging verifies MD5 entries,
-unchanged kernel and rootfs metadata, and a rootfs no larger than stock.
+Checks cover touch reselection, gesture suppression, momentum handoff, interrupted and reversed wheel glides, recycled rows, menu return, count changes, empty/oversized rows, preserved Play/Pause, power-release exclusions and stock key-lock parity. Every call checks preserved registers/stack, and native calls check the PIC `$t9` convention.
 
-Before distributing as hardware-verified, check a Q2 on Home, Local Songs, folders and settings:
-wheel → tap another item → centre; wheel → swipe → settle → centre; swipe → wheel during momentum;
-rapid wheel reversals; return from a submenu; and screen-off wake, Play/Pause and long-press power.
-Confirm the outline follows the item actually opened and the physical centre emits the expected key.
+Two fresh builds must produce identical `update.tar` files. Packaging verifies MD5 entries, unchanged kernel and rootfs metadata, and a rootfs no larger than stock.
+
+## Hardware validation
+
+Before distributing a build as hardware-verified, check a Q2 on Home, Local Songs, folders and settings:
+
+- wheel → tap another item → centre
+- wheel → swipe → settle → centre
+- swipe → wheel during momentum
+- rapid wheel reversals
+- return from a submenu
+- screen-off wake
+- Play/Pause
+- long-press power
+
+Confirm the outline follows the item actually opened and the physical centre button emits the expected key.
