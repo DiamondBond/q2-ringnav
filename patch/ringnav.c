@@ -166,9 +166,9 @@ static int allowed_top(void *top) {
     return top && context_id(widget_get_prop_str(top, "name", (void *)0)) >= 0;
 }
 
-/* A click identifies its pane by ancestry. Without a click, two visible panes require exactly
- * one existing selection; never guess which pane the wheel should control. */
-static void *surface_under(void *top, void *target, void **other) {
+/* A click identifies its pane by ancestry. On the first wheel turn, an unowned pair starts
+ * with the first pane in UI order; painting and touch never choose one implicitly. */
+static void *surface_under(void *top, void *target, void **other, int wheel) {
     void *found[2] = { (void *)0, (void *)0 };
     int count = 0, aborted = 0, budget = 512;
     find_surface(top, found, &count, &aborted, 0, &budget);
@@ -188,6 +188,7 @@ static void *surface_under(void *top, void *target, void **other) {
     }
     int first = widget_get_prop_int(found[0], SEL, -1) >= 0;
     int second = widget_get_prop_int(found[1], SEL, -1) >= 0;
+    if (wheel && !first && !second) return found[0];
     return first == second ? (void *)0 : (first ? found[0] : found[1]);
 }
 
@@ -196,7 +197,7 @@ static void *surface(void *target, void **other) {
     void *wm = window_manager();
     if (window_manager_is_animating(wm)) return (void *)0;
     void *top = window_manager_get_top_window(wm);
-    return allowed_top(top) ? surface_under(top, target, other) : (void *)0;
+    return allowed_top(top) ? surface_under(top, target, other, 0) : (void *)0;
 }
 
 static void prop(void *w, const char *name, int value) {
@@ -637,8 +638,8 @@ int ringnav(void *ctx, void *event) {
     void *wm = window_manager(), *top = window_manager_get_top_window(wm);
     if (!allowed_top(top)) return result;
     if (window_manager_is_animating(wm) || window_manager_get_pointer_pressed(wm)) return STOP;
-    void *w = surface_under(top, (void *)0, (void *)0);
     int dir = key == KEY_NEXT ? 1 : key == KEY_PREV ? -1 : 0;
+    void *w = surface_under(top, (void *)0, (void *)0, dir != 0);
     if (!w) return dir ? STOP : result;
     if (!load(&g_menu, w)) return dir ? STOP : result;
     int touch = widget_get_prop_int(w, TOUCH, 0);

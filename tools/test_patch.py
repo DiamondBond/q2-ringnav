@@ -286,7 +286,7 @@ m=Machine(); hidden=m.node(visible=0); shown=m.node(); pages=m.node('pages',chil
 m.top=m.node('window','artistinfo_page',[pages]); assert m.call()==11 and m.moved()[0][1]==shown; passed()
 m.nodes[hidden]['visible']=1
 assert m.call()==11 and m.moved()[0][1]==shown; passed()
-m.top=m.node('window','sysset_page',[hidden,shown]); assert m.call()==11 and not m.moved(); passed()
+m.top=m.node('window','sysset_page',[hidden,shown]); assert m.call()==11 and m.moved()[-1][1]==hidden; passed()
 # A horizontal scroll view is not a navigation pane and cannot make a page ambiguous.
 m=Machine(); vert=m.node(); horiz=m.node(); m.word(horiz+O['VIEW_HORIZONTAL'],1)
 m.top=m.node('window','sysset_page',[horiz,vert])
