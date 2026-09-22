@@ -36,9 +36,13 @@ To go back to stock, just flash the official Shanling Q2 V1.32 firmware again.
 
 The selected item gets a small white outline so you can see what will open when you press the centre button. The home screen keeps its normal selected-card look without the extra outline.
 
-V1.5R and V1.6R were both tested on real Q2 hardware. V1.5R confirmed highlighting, centre-button selection and music selection; V1.6R confirmed the home screen keeps its native selected-card look with no added outline. V1.7R adds the centre double-press screen toggle described above and awaits device validation.
-
 If you find a menu where something behaves strangely, please open an issue and say which screen you were on and what you did.
+
+## Changelog
+
+- **V1.7R**: Added centre button double-press to toggle the screen on/off (awaiting hardware validation).
+- **V1.6R**: Home screen now keeps the stock selected-card highlight without any extra outline.
+- **V1.5R**: Added menu item highlighting, centre-button selection, and music selection features. Tested on real Q2 hardware.
 
 ---
 
