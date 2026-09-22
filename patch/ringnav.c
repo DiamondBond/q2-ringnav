@@ -9,7 +9,7 @@
 #define DOUBLE_CLICK_MS 400
 #define ACCEL_MS 140
 #define ACCEL_DIV 3
-#define ACCEL_MAX 8
+#define ACCEL_MAX_SHIFT 3
 #define MAX_ENTRIES 256
 #define POS_MEM 64
 #define I(p, o) (*(int *)((char *)(p) + (o)))
@@ -18,7 +18,7 @@
 
 /* Writable state lives in the zero-filled page the builder maps past the payload text.
  * last_center arms the screen toggle pair; wheel_* scale repeated fast detents;
- * pos_* remember the selected row per audited context across page recreation. */
+ * pos[] remembers the selected row per audited context across page recreation. */
 typedef struct {
     unsigned last_center; /* release time of the last selection press */
     void *center_top;     /* top window of that press */
@@ -26,9 +26,7 @@ typedef struct {
     unsigned last_wheel;  /* time of the previous wheel detent */
     int wheel_dir;        /* direction of that detent */
     unsigned wheel_run;   /* consecutive fast detents in that direction */
-    int pos_ctx[POS_MEM]; /* audited context index + 1, 0 when the slot is unused */
-    int pos_id[POS_MEM];  /* last selected logical row in that context */
-    unsigned pos_next;    /* round-robin victim once the table is full */
+    int pos[POS_MEM];     /* last selected logical row + 1; 0 when the slot is unused */
 } scratch_t;
 static scratch_t st __attribute__((section(".scratch")));
 
@@ -77,9 +75,9 @@ static int clamp_step(int offset, int maximum, int delta) {
 }
 
 /* Consecutive detents closer than ACCEL_MS in one direction step further, like spinning
- * an iPod wheel: x2 every ACCEL_DIV detents, capped at ACCEL_MAX. A pause or reversal
- * starts over. Stock rate-limits wheel keys to roughly one per 80-200 ms, so real ticks
- * land inside the acceleration window. */
+ * an iPod wheel: x2 every ACCEL_DIV detents, capped at 1 << ACCEL_MAX_SHIFT. A pause or
+ * reversal starts over. Stock rate-limits wheel keys to roughly one per 80-200 ms, so real
+ * ticks land inside the acceleration window. */
 static int wheel_step(int dir, unsigned now) {
     if (st.last_wheel && now - st.last_wheel <= ACCEL_MS && st.wheel_dir == dir)
         ++st.wheel_run;
@@ -87,10 +85,8 @@ static int wheel_step(int dir, unsigned now) {
         st.wheel_run = 1;
     st.last_wheel = now;
     st.wheel_dir = dir;
-    int step = 1;
-    for (unsigned run = st.wheel_run; run >= ACCEL_DIV && step < ACCEL_MAX; run -= ACCEL_DIV)
-        step *= 2;
-    return step;
+    unsigned shift = st.wheel_run / ACCEL_DIV;
+    return 1 << (shift > ACCEL_MAX_SHIFT ? ACCEL_MAX_SHIFT : shift);
 }
 
 /* A tap target has an EVT_CLICK handler. V1.32 widget emitter @0x60; emitter_on_with_tag items are
@@ -176,20 +172,7 @@ static void prop(void *w, const char *name, int value) {
     if (widget_get_prop_int(w, name, -1) != value) widget_set_prop_int(w, name, value);
 }
 
-static int *pos_slot(int ctx, int create) {
-    if (ctx < 0) return (void *)0;
-    for (int i = 0; i < POS_MEM; ++i)
-        if (st.pos_ctx[i] == ctx + 1) return &st.pos_id[i];
-    if (!create) return (void *)0;
-    unsigned i = st.pos_next++ % POS_MEM;
-    st.pos_ctx[i] = ctx + 1;
-    return &st.pos_id[i];
-}
-
-static int recall(int ctx) {
-    int *p = pos_slot(ctx, 0);
-    return p ? *p : -1;
-}
+static int recall(int ctx) { return (ctx >= 0 && ctx < POS_MEM ? st.pos[ctx] : 0) - 1; }
 
 /* Context of the active top window; every caller already holds a navigation surface. */
 static int context_now(void) {
@@ -199,14 +182,72 @@ static int context_now(void) {
 
 /* Remember where the user was. Widget props die with a recreated page; this survives it. */
 static void select(void *w, int id) {
-    if (id >= 0) {
-        int *p = pos_slot(context_now(), 1);
-        if (p) *p = id;
-    }
+    int ctx = context_now();
+    if (id >= 0 && ctx >= 0 && ctx < POS_MEM) st.pos[ctx] = id + 1;
     prop(w, SEL, id);
 }
 
-static void reveal(menu_t *m, int id);
+static rect_t bounds(menu_t *m, int i) {
+    void *e = m->at[i];
+    rect_t r = { 0, 0, I(e, 8), I(e, 0x0c) };
+    for (void *p = e; p && p != m->w; p = P(p, 0x48)) {
+        r.x += I(p, 0);
+        r.y += I(p, 4);
+    }
+    if (m->kind != 3) r.y -= m->top;
+    if (m->kind == 1) r.x -= I(m->w, 0x80);
+    return r;
+}
+
+static int index_of(menu_t *m, int id) {
+    for (int i = 0; i < m->n; ++i)
+        if (m->id[i] == id) return i;
+    return -1;
+}
+
+static int moving(menu_t *m) {
+    return m->kind == 1 ? P(m->w, 0xe8) != 0 : m->kind == 2 ? P(m->w, 0xd0) != 0 : 0;
+}
+
+static void stop_scroll(menu_t *m) {
+    if (m->kind == 2)
+        table_client_stop_animator_scroll(m->w);
+    else if (m->kind == 1 && P(m->w, 0xe8)) {
+        /* Same pause/destroy/null sequence as stock table_client_stop_animator_scroll. */
+        void *a = P(m->w, 0xe8);
+        widget_animator_pause(a);
+        widget_animator_destroy(a);
+        P(m->w, 0xe8) = (void *)0;
+    }
+}
+
+/* Least viewport move that makes logical row id fully visible; no animator if already visible.
+ * Reversing into the current viewport cancels the previous glide away from it. */
+static void show(menu_t *m, int id) {
+    int y, h;
+    if (m->kind == 2) {
+        y = id * m->row;
+        h = m->row;
+    } else {
+        int i = index_of(m, id);
+        if (i < 0) return;
+        rect_t r = bounds(m, i);
+        y = r.y + m->top;
+        h = r.h;
+    }
+    int want = y < m->top ? y : y + h > m->top + m->height ? y + h - m->height : m->top;
+    want = clamp_step(want, (m->kind == 2 ? m->rows * m->row : I(m->w, 0x7c)) - m->height, 0);
+    if (want == m->top) {
+        if (moving(m)) stop_scroll(m);
+        return;
+    }
+    if (m->kind == 2) {
+        stop_scroll(m);
+        table_client_scroll_to(m->w, want);
+    } else
+        scroll_view_scroll_delta_to(m->w, 0, want - m->top, GLIDE_MS);
+    m->top = want;
+}
 
 static int load(menu_t *m, void *w) {
     m->w = w;
@@ -246,68 +287,10 @@ static int load(menu_t *m, void *w) {
         int id = recall(context_now());
         if (id >= 0 && id < m->rows) {
             prop(w, SEL, id);
-            reveal(m, id);
+            show(m, id);
         }
     }
     return 1;
-}
-
-static rect_t bounds(menu_t *m, int i) {
-    void *e = m->at[i];
-    rect_t r = { 0, 0, I(e, 8), I(e, 0x0c) };
-    for (void *p = e; p && p != m->w; p = P(p, 0x48)) {
-        r.x += I(p, 0);
-        r.y += I(p, 4);
-    }
-    if (m->kind != 3) r.y -= m->top;
-    if (m->kind == 1) r.x -= I(m->w, 0x80);
-    return r;
-}
-
-static int index_of(menu_t *m, int id) {
-    for (int i = 0; i < m->n; ++i)
-        if (m->id[i] == id) return i;
-    return -1;
-}
-
-static int moving(menu_t *m) {
-    return m->kind == 1 ? P(m->w, 0xe8) != 0 : m->kind == 2 ? P(m->w, 0xd0) != 0 : 0;
-}
-
-static void stop_scroll(menu_t *m) {
-    if (m->kind == 2)
-        table_client_stop_animator_scroll(m->w);
-    else if (m->kind == 1 && P(m->w, 0xe8)) {
-        /* Same pause/destroy/null sequence as stock table_client_stop_animator_scroll. */
-        void *a = P(m->w, 0xe8);
-        widget_animator_pause(a);
-        widget_animator_destroy(a);
-        P(m->w, 0xe8) = (void *)0;
-    }
-}
-
-/* Least viewport move that makes logical row id fully visible; no animator if already visible. */
-static void reveal(menu_t *m, int id) {
-    int y, h;
-    if (m->kind == 2) {
-        y = id * m->row;
-        h = m->row;
-    } else {
-        int i = index_of(m, id);
-        if (i < 0) return;
-        rect_t r = bounds(m, i);
-        y = r.y + m->top;
-        h = r.h;
-    }
-    int want = y < m->top ? y : y + h > m->top + m->height ? y + h - m->height : m->top;
-    want = clamp_step(want, (m->kind == 2 ? m->rows * m->row : I(m->w, 0x7c)) - m->height, 0);
-    if (want == m->top) return;
-    if (m->kind == 2) {
-        stop_scroll(m);
-        table_client_scroll_to(m->w, want);
-    } else
-        scroll_view_scroll_delta_to(m->w, 0, want - m->top, GLIDE_MS);
-    m->top = want;
 }
 
 /* Keep selection during native momentum and wheel glides. Once settled, repair an offscreen
@@ -372,7 +355,6 @@ int ringnav_touch(void *ctx, void *event) {
     st.last_center = 0;
     st.center_top = st.center_surface = (void *)0;
     st.last_wheel = 0;
-    st.wheel_run = 0;
     void *w = surface();
     menu_t m;
     if (!result && w && load(&m, w)) {
@@ -447,7 +429,6 @@ int ringnav(void *ctx, void *event) {
         st.center_top = top;
         st.center_surface = w;
         st.last_wheel = 0; /* A press ends any spin. */
-        st.wheel_run = 0;
         select(w, m.id[cur]);
         widget_invalidate_force(w, (void *)0);
         char click[0x30];
@@ -466,31 +447,10 @@ int ringnav(void *ctx, void *event) {
             slide_menu_scroll_to_prev(w);
     } else if (m.n) {
         int id = widget_get_prop_int(w, SEL, -1);
-        int next = id < 0 ? (cur >= 0 ? m.id[cur] : 0) : id + dir * step;
-        if (next < 0) next = 0;
-        if (next >= m.rows) next = m.rows - 1;
+        int next = clamp_step(id < 0 ? (cur >= 0 ? m.id[cur] : 0) : id + dir * step, m.rows - 1, 0);
         if (next == id) return STOP;
-        int y, h;
-        if (m.kind == 2) {
-            y = next * m.row;
-            h = m.row;
-        } else {
-            rect_t r = bounds(&m, next);
-            y = r.y + m.top;
-            h = r.h;
-        }
-        int want = y < m.top ? y : y + h > m.top + m.height ? y + h - m.height : m.top;
-        want = clamp_step(want, (m.kind == 2 ? m.rows * m.row : I(w, 0x7c)) - m.height, 0);
         select(w, next);
-        /* Reversing into the current viewport must cancel the previous glide away from it. */
-        if (want == m.top && moving(&m)) stop_scroll(&m);
-        if (want != m.top) {
-            if (m.kind == 2) {
-                stop_scroll(&m);
-                table_client_scroll_to(w, want);
-            } else
-                scroll_view_scroll_delta_to(w, 0, want - m.top, GLIDE_MS);
-        }
+        show(&m, next);
     } else {
         int max = (m.kind == 2 ? m.rows * m.row : I(w, 0x7c)) - m.height;
         int next = clamp_step(m.top, max, dir * RING_STEP * step);

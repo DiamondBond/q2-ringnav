@@ -63,7 +63,7 @@ Four checked MIPS prologues redirect into a payload at `0xb00000`, using the fin
 
 Selection is stored in widget-owned integer properties on the navigation surface, independently of AWTK's focused flag. The outline and centre action resolve that same logical selection against the current entries. Centre dispatches a synchronous native `EVT_CLICK`, so a queued click cannot hit a row rebound between selection and delivery. It never dereferences the target after delivery.
 
-A `{context, index}` table in the same scratch page remembers the selected row per audited top-window name. A recreated page restores that row and moves the viewport the least amount that makes it visible; a page that survives navigation keeps its widget property and never reads the table. Contexts are stored as indices into `patch/contexts.inc`, not name pointers, because AWTK owns and frees the window name string. The table dies with the scratch page at power-off.
+A per-context slot array in the same scratch page remembers the selected row, indexed by the audited top-window index into `patch/contexts.inc` — not by name pointer, because AWTK owns and frees the window name string. A recreated page restores that row and moves the viewport the least amount that makes it visible; a page that survives navigation keeps its widget property and never reads the array. The memory dies with the scratch page at power-off.
 
 Wheel detents accelerate: consecutive detents less than 140 ms apart in the same direction double the step every third detent, up to eight entries. A pause, a reversal, a touch or a centre press starts the count over. Music tables glide with the stock `table_client_scroll_to` animator instead of jumping, so both list kinds settle the same way.
 
