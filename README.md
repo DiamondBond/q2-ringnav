@@ -18,8 +18,6 @@ The touchscreen still works normally. Outside supported menus, the wheel still c
 
 Make sure the Q2 is charged before updating, and don't remove the microSD card while the update is running.
 
-This is for the **Shanling Q2 on stock V1.32 firmware**.
-
 To restore stock firmware via the UI; flash the official Shanling Q2 V1.32 firmware through **System settings → System Update → TF card update**.
 
 If UI is not working, use [Shanling's recovery package](https://drive.google.com/file/d/1aINQfJu6n0JTQ4hOzzD1uSpSj3TS_NJj/view?usp=drive_link):
