@@ -4,7 +4,7 @@ Adds wheel selection to Shanling Q2 menus while keeping native touchscreen navig
 
 Release candidate: `dist/Q2 Firmware V1.6R.zip` (same layout as the stock ZIP).
 Device feedback on V1.5R confirms centre selection, highlighting and music selection work.
-V1.6R removes the unnecessary outline from the home carousel; this tweak awaits device validation.
+V1.6R removes the unnecessary outline from the home carousel.
 
 ## Controls
 
