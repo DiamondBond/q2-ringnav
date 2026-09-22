@@ -209,7 +209,7 @@ int ringnav_paint(void *w, void *canvas) {
     int result = stock_paint(w, canvas);
     if (!w || !canvas || !kind(w) || surface() != w) return result;
     menu_t m;
-    if (!load(&m, w)) return result;
+    if (!load(&m, w) || m.kind == 3) return result; /* Home already shows its selected card. */
     int i = reconcile(&m, !moving(&m) && !window_manager_get_pointer_pressed(window_manager()));
     if (i < 0) return result;
     rect_t r = bounds(&m, i), old, clip;

@@ -1,15 +1,16 @@
-# Q2 ring navigation (V1.32 → V1.5R)
+# Q2 ring navigation (V1.32 → V1.6R)
 
 Adds wheel selection to Shanling Q2 menus while keeping native touchscreen navigation.
 
-Release candidate: `dist/Q2 Firmware V1.5R.zip` (same layout as the stock ZIP).
-**Device validation is still pending.** Emulation covers input, selection and the stock canvas
-routines, not the complete UI or physical button mapping.
+Release candidate: `dist/Q2 Firmware V1.6R.zip` (same layout as the stock ZIP).
+Device feedback on V1.5R confirms centre selection, highlighting and music selection work.
+V1.6R removes the unnecessary outline from the home carousel; this tweak awaits device validation.
 
 ## Controls
 
-- Menus show a two-pixel white outline around the selected entry, independent of the red
+- Lists show a two-pixel white outline around the selected entry, independent of the red
   currently-playing indication and native touch focus. Selection initializes on the first paint.
+  The home carousel keeps its native selected-card appearance without an added outline.
 - Turning the ring moves one entry at a time and keeps it visible. Ordinary lists use the stock
   300 ms glide; recycled `table_client` rows use immediate scrolling and logical row indices.
 - A short centre press opens the selected entry. This uses key **218**, the stock screen-toggle
@@ -32,7 +33,7 @@ routines, not the complete UI or physical button mapping.
 ## Install and compatibility
 
 Install like a stock update. Flash stock V1.32 to revert. The About screen and updater share the
-`V1.5R` version literal; changing it allows installation over V1.4R, since the updater refuses an
+`V1.6R` version literal; changing it allows installation over V1.5R, since the updater refuses an
 identical version label. Only the audited V1.32 base firmware is supported.
 
 Release hashes and build details are in `dist/manifest.json`.

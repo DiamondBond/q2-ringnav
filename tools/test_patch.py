@@ -256,9 +256,11 @@ m.top=oldtop; m.paint(w); assert m.selected(w)==10
 m.word(w+0x7c,1); m.word(w+0x80,0); rebind(w,0); m.paint(w)
 assert m.selected(w)==0; passed()
 
-# Home uses the stock carousel value (including touch changes).
+# Home keeps its native carousel presentation and value (including touch changes).
 m=Machine(); w=m.page('home_page','slide_menu'); m.word(w+0x78,1)
 child=[m.entry(w),m.entry(w)]; m.nodes[w]['children']=child
+assert m.paint(w)==0 and not m.strokes
+assert any(c[0]=='stock_paint' for c in m.calls)
 assert m.call(218)==11 and m.dispatched()[0][1]==child[1]
 m.word(w+0x78,0)
 assert m.call(218)==11 and m.dispatched()[0][1]==child[0]; passed()
