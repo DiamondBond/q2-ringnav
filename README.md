@@ -4,7 +4,9 @@ Firmware mod for the Shanling Q2 that lets you use the scroll wheel to move thro
 
 The touchscreen still works normally. Outside supported menus, the wheel still controls volume and the other buttons keep their normal behaviour.
 
-**Latest firmware: V1.9R**
+**Latest firmware: V1.8R**
+
+Main is ahead of the published V1.7R release.
 
 [**Download the latest release**](https://github.com/DiamondBond/q2-ringnav/releases/latest)
 
@@ -14,7 +16,7 @@ The touchscreen still works normally. Outside supported menus, the wheel still c
 2. Unzip it and copy `update.tar` to the root of your microSD card.
 3. On the Q2, go to **System settings → System Update → TF card update**.
 4. Confirm the update and wait for the player to restart.
-5. Check **About** and make sure it shows `V1.9R`.
+5. Check **About** and make sure it shows `V1.8R`.
 
 Make sure the Q2 is charged before updating, and don't remove the microSD card while the update is running.
 
@@ -41,9 +43,8 @@ If you find a menu where something behaves strangely, please open an issue and s
 
 ## Changelog
 
-- **V1.9R**: Leaving and returning to a page restores the selected row and scrolls it back into view (awaiting hardware validation).
-- **V1.8R**: Wheel acceleration, gliding music tables, a scoped double-press screen toggle, nested tap-target selection and a build-time context audit (awaiting hardware validation).
-- **V1.7R**: Added centre button double-press to toggle the screen on/off (awaiting hardware validation).
+- **V1.8R**: Wheel acceleration, gliding music tables, a scoped double-press screen toggle, nested tap-target selection, per-context position memory and a build-time context audit.
+- **V1.7R**: Added centre button double-press to toggle the screen on/off.
 - **V1.6R**: Home screen now keeps the stock selected-card highlight without any extra outline.
 - **V1.5R**: Added menu item highlighting, centre-button selection, and music selection features. Tested on real Q2 hardware.
 
