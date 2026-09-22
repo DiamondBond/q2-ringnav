@@ -182,8 +182,8 @@ def build(zip_path, out, step):
         rootfs_sha256=sha(newsq.read_bytes()), kernel_sha256=sha(blobs['recovery-update/xImage']),
         hook_address=hex(HOOK), hook_file_offset=hex(hookoff), patch_address=hex(BASE),
         patch_file_offset=hex(appendoff), patch_bytes=len(payload), ring_step_pixels=step,
-        version='V1.5R', hooks=hooks, functions={n:hex(syms[n]) for n in FUNCTIONS},
-        globals={n:hex(syms[n]) for n in GLOBALS}, patch_symbols={n:hex(v) for n,v in ps.items()},
+        version='V1.5R', hooks=hooks,
+        patch_symbols={n:hex(v) for n,v in ps.items() if n.startswith('stock_')},
         tools={t:run(t,'--version').splitlines()[0] for t in ['clang','ld.lld','llvm-objcopy']})
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     print(json.dumps({k:manifest[k] for k in ['update_sha256','patch_bytes','version']},indent=2))

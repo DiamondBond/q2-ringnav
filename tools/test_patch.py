@@ -5,7 +5,7 @@ Requires unicorn==2.1.4. Does not emulate the entire device or flash hardware.
 import json, pathlib, struct, sys
 from unicorn import Uc, UC_ARCH_MIPS, UC_MODE_MIPS32, UC_MODE_LITTLE_ENDIAN, UC_HOOK_CODE
 from unicorn.mips_const import *
-from build import segments, symbols, HOOK, HOOKS
+from build import segments, symbols, HOOK, HOOKS, FUNCTIONS, GLOBALS
 B=pathlib.Path(sys.argv[1] if len(sys.argv)>1 else 'build')
 manifest=json.loads((B/'manifest.json').read_text())
 syms=symbols(B/'stock-demo')
@@ -36,7 +36,7 @@ class Machine:
         self.word(self.lcd+0xc0,0x12345678)
         self.clip=(0,0,240,240)
         self.handlers={}
-        for name in manifest['functions']: self.handlers[syms[name]]=name
+        for name in FUNCTIONS: self.handlers[syms[name]]=name
         if patched:
             for name in ('paint','dispatch'):
                 self.handlers[int(manifest['patch_symbols']['stock_'+name+'_trampoline'],16)]='stock_'+name
@@ -44,7 +44,7 @@ class Machine:
         self.handlers[syms['memcpy@GLIBC_2.0']]='memcpy'
         self.handlers[syms['memset@GLIBC_2.0']]='memset'
         self.u.hook_add(UC_HOOK_CODE,self.hook)
-        for name in manifest['globals']: self.byte(syms[name],0)
+        for name in GLOBALS: self.byte(syms[name],0)
         self.byte(syms['g_backlight_status'],1)
     def byte(self,a,v): self.u.mem_write(a,bytes([v]))
     def word(self,a,v): self.u.mem_write(a,struct.pack('<I',v&0xffffffff))
@@ -114,8 +114,6 @@ class Machine:
             h=self.get(u.reg_read(UC_MIPS_REG_SP)+16)
             clip=self.clip if name=='canvas_stroke_rect' else (self.get(self.canvas+0x10),self.get(self.canvas+0x14),self.get(self.canvas+0x18)-self.get(self.canvas+0x10)+1,self.get(self.canvas+0x1c)-self.get(self.canvas+0x14)+1)
             self.strokes.append((signed(b),signed(c),signed(d),signed(h),clip,self.get(self.lcd+0xc0))); ret=0
-        elif name=='table_client_scroll_to': self.word(a+0x80,b); ret=0
-        elif name=='scroll_view_set_offset': self.word(a+0x80,b); self.word(a+0x84,c); ret=0
         elif name=='scroll_view_scroll_delta_to':
             if self.glide:
                 self.word(a+0x80,self.get(a+0x80)+b); self.word(a+0x84,self.get(a+0x84)+c)
@@ -148,7 +146,7 @@ class Machine:
         child=self.node(t)
         self.top=self.node('window',name,[child])
         return child
-    def moved(self): return [x for x in self.calls if x[0] in ('scroll_view_scroll_delta_to','scroll_view_set_offset','table_client_scroll_to','table_client_set_yoffset','slide_menu_scroll_to_next','slide_menu_scroll_to_prev')]
+    def moved(self): return [x for x in self.calls if x[0] in ('scroll_view_scroll_delta_to','table_client_set_yoffset','slide_menu_scroll_to_next','slide_menu_scroll_to_prev')]
     def dispatched(self): return [x for x in self.calls if x[0]=='stock_dispatch']
 
 checks=0

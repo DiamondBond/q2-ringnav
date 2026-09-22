@@ -203,8 +203,6 @@ static int reconcile(menu_t *m, int settle) {
     return cur;
 }
 
-static void invalidate(void *w) { widget_invalidate_force(w, (void *)0); }
-
 /* Stock paints children first and calls this with the surface's canvas origin restored.
  * Explicit outline avoids theme-dependent focus and doesn't overwrite playing/pressed styles. */
 int ringnav_paint(void *w, void *canvas) {
@@ -239,7 +237,7 @@ int ringnav_touch(void *ctx, void *event) {
     menu_t m;
     if (!result && w && load(&m, w)) {
         stop_scroll(&m); prop(w, TOUCH, 1);
-        invalidate(w);
+        widget_invalidate_force(w, (void *)0);
     }
     return result; /* The very same touch continues through the stock tap/drag handlers. */
 }
@@ -253,7 +251,7 @@ int ringnav_dispatch(void *target, void *event) {
         if (w && load(&m, w)) {
             for (int i = 0; i < m.n; ++i) {
                 if (m.at[i] == target) {
-                    prop(w, SEL, m.id[i]); invalidate(w); break;
+                    prop(w, SEL, m.id[i]); widget_invalidate_force(w, (void *)0); break;
                 }
             }
         }
@@ -313,6 +311,6 @@ int ringnav(void *ctx, void *event) {
         if (m.kind == 2) { stop_scroll(&m); table_client_set_yoffset(w, next); }
         else if (next != m.top) scroll_view_scroll_delta_to(w, 0, next - m.top, GLIDE_MS);
     }
-    invalidate(w);
+    widget_invalidate_force(w, (void *)0);
     return STOP;
 }
