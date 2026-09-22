@@ -6,8 +6,6 @@ The touchscreen still works normally. Outside supported menus, the wheel still c
 
 **Latest firmware: V1.8R**
 
-Main is ahead of the published V1.7R release.
-
 [**Download the latest release**](https://github.com/DiamondBond/q2-ringnav/releases/latest)
 
 ## Install
