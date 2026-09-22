@@ -426,6 +426,55 @@ assert m.selected(w)==3
 w2,es2=m.page_list(6,extent=1000)
 assert m.paint(w2)==0 and m.selected(w2)==3; passed()
 
+# Duplicate row text restores the occurrence the user left, not the first duplicate.
+m=Machine(); w,es=m.page_list(6,extent=1000)
+for e in es: m.nodes[e]['text']='Intro'
+m.paint(w)
+for _ in range(4): assert m.call()==11
+assert m.selected(w)==4
+w2,es2=m.page_list(6,extent=1000)
+for e in es2: m.nodes[e]['text']='Intro'
+assert m.paint(w2)==0 and m.selected(w2)==4; passed()
+# After a re-sort, equal-text rows resolve to the occurrence nearest the old position.
+m=Machine(); w,es=m.page_list(6,extent=1000)
+m.nodes[es[4]]['text']='dup'
+m.paint(w)
+for _ in range(4): assert m.call()==11
+assert m.selected(w)==4
+w2,es2=m.page_list(6,extent=1000)
+m.nodes[es2[1]]['text']='dup'; m.nodes[es2[5]]['text']='dup'
+assert m.paint(w2)==0 and m.selected(w2)==5; passed()
+# Equal distance keeps the earlier duplicate.
+m=Machine(); w,es=m.page_list(6,extent=1000)
+m.nodes[es[3]]['text']='dup'
+m.paint(w)
+for _ in range(3): assert m.call()==11
+assert m.selected(w)==3
+w2,es2=m.page_list(6,extent=1000)
+m.nodes[es2[2]]['text']='dup'; m.nodes[es2[4]]['text']='dup'
+assert m.paint(w2)==0 and m.selected(w2)==2; passed()
+# Two rows share a title; the second text decides before proximity does.
+m=Machine(); w,es=m.page_list(4,extent=1000)
+for e in es: m.nodes[e]['text']='Intro'
+m.nodes[es[0]]['children']=[m.node('label',text='Artist A')]
+m.nodes[es[1]]['children']=[m.node('label',text='Artist B')]
+m.paint(w)
+assert m.call()==11 and m.selected(w)==1
+w2,es2=m.page_list(4,extent=1000)
+for e in es2: m.nodes[e]['text']='Intro'
+m.nodes[es2[2]]['children']=[m.node('label',text='Artist A')]
+m.nodes[es2[3]]['children']=[m.node('label',text='Artist B')]
+assert m.paint(w2)==0 and m.selected(w2)==3; passed()
+# A subtitle missing from the recreated rows never blocks the primary match.
+m=Machine(); w,es=m.page_list(4,extent=1000)
+for e in es: m.nodes[e]['text']='Intro'
+m.nodes[es[1]]['children']=[m.node('label',text='Artist B')]
+m.paint(w)
+assert m.call()==11 and m.selected(w)==1
+w2,es2=m.page_list(4,extent=1000)
+m.nodes[es2[0]]['text']='Intro'; m.nodes[es2[3]]['text']='Intro'
+assert m.paint(w2)==0 and m.selected(w2)==0; passed()
+
 # An interrupted recall glide keeps the remembered row instead of adopting a visible one.
 m=Machine(); w,es=m.page_list(10,extent=1000)
 m.paint(w)

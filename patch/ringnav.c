@@ -24,16 +24,17 @@
  * the selected row per audited context across page recreation; reveal_* pin the recall glide so
  * an interruption cannot silently rewrite that memory. */
 typedef struct {
-    unsigned last_center;       /* release time of the last selection press */
-    void *center_top;           /* top window of that press */
-    void *center_surface;       /* navigation surface of that press */
-    unsigned last_wheel;        /* time of the previous wheel detent */
-    int wheel_dir;              /* direction of that detent */
-    unsigned wheel_run;         /* consecutive fast detents in that direction */
-    int pos_id[POS_MEM];        /* last selected logical row + 1 per audited context; 0 = unused */
-    unsigned pos_hash[POS_MEM]; /* that row's text hash; 0 when the row has no usable text */
-    void *reveal_surface;       /* surface of the interrupted recall glide, 0 when none */
-    int reveal_id;              /* logical row that glide was bringing into view */
+    unsigned last_center;        /* release time of the last selection press */
+    void *center_top;            /* top window of that press */
+    void *center_surface;        /* navigation surface of that press */
+    unsigned last_wheel;         /* time of the previous wheel detent */
+    int wheel_dir;               /* direction of that detent */
+    unsigned wheel_run;          /* consecutive fast detents in that direction */
+    int pos_id[POS_MEM];         /* last selected logical row + 1 per audited context; 0 = unused */
+    unsigned pos_hash[POS_MEM];  /* hash of the row's first text; 0 when the row has none */
+    unsigned pos_hash2[POS_MEM]; /* hash of its second text; 0 when the row has only one */
+    void *reveal_surface;        /* surface of the interrupted recall glide, 0 when none */
+    int reveal_id;               /* logical row that glide was bringing into view */
 } scratch_t;
 static scratch_t st __attribute__((section(".scratch")));
 
@@ -181,26 +182,39 @@ static void prop(void *w, const char *name, int value) {
     if (widget_get_prop_int(w, name, -1) != value) widget_set_prop_int(w, name, value);
 }
 
-/* FNV-1a of the first non-empty text property in a small row subtree; 0 means "no identity". */
-static const char *row_text(void *w, int depth, int *budget) {
-    if (!w || depth == 4 || --*budget < 0) return (void *)0;
-    const char *s = widget_get_prop_str(w, "text", (void *)0);
-    if (s && *s) return s;
-    unsigned n = widget_count_children(w);
-    for (unsigned i = 0; i < n; ++i) {
-        const char *found = row_text(widget_get_child(w, i), depth + 1, budget);
-        if (found) return found;
-    }
-    return (void *)0;
+/* FNV-1a of the first two non-empty text properties in a small row subtree: the item's own name
+ * and an optional subtitle, in pre-order. Each stays 0 while its text has not been seen. No stock
+ * list row carries a stable id: emitter tags and pointer props are unused by the app rows (only
+ * ROW_INDEX, which a re-sort rewrites), so these hashes are the identity available to restore. */
+typedef struct {
+    unsigned one, two;
+} row_id_t;
+
+static void row_hash_text(const char *s, unsigned *h) {
+    *h = 2166136261u;
+    for (; *s; ++s) *h = (*h ^ (unsigned char)*s) * 16777619u;
 }
 
-static unsigned row_hash(void *w) {
+static void row_id_walk(void *w, int depth, int *budget, row_id_t *id) {
+    if (!w || depth == 4 || id->two || --*budget < 0) return;
+    const char *s = widget_get_prop_str(w, "text", (void *)0);
+    if (s && *s) {
+        if (!id->one)
+            row_hash_text(s, &id->one);
+        else {
+            row_hash_text(s, &id->two);
+            return;
+        }
+    }
+    unsigned n = widget_count_children(w);
+    for (unsigned i = 0; i < n; ++i) row_id_walk(widget_get_child(w, i), depth + 1, budget, id);
+}
+
+static row_id_t row_id(void *w) {
+    row_id_t id = { 0, 0 };
     int budget = 32;
-    const char *s = row_text(w, 0, &budget);
-    if (!s) return 0;
-    unsigned h = 2166136261u;
-    for (; *s; ++s) h = (h ^ (unsigned char)*s) * 16777619u;
-    return h;
+    row_id_walk(w, 0, &budget, &id);
+    return id;
 }
 
 /* Context of the active top window; every caller already holds a navigation surface. */
@@ -213,18 +227,24 @@ static int index_of(menu_t *m, int id);
 static void reveal(menu_t *m, int id, int cancel);
 
 /* Remember where the user was. Widget props die with a recreated page; this survives it.
- * Non-virtual lists also remember the row text, so a reordered list restores the same item. */
+ * Non-virtual lists also remember the row's first two text values, so a reordered list restores
+ * the same item and duplicate names can be told apart by their second line. */
 static void select(menu_t *m, int id) {
-    unsigned hash = 0;
+    unsigned hash = 0, hash2 = 0;
     if (id >= 0) {
         int ctx = context_now();
         if (m->kind == 1) {
             int i = index_of(m, id);
-            if (i >= 0) hash = row_hash(m->at[i]);
+            if (i >= 0) {
+                row_id_t r = row_id(m->at[i]);
+                hash = r.one;
+                hash2 = r.two;
+            }
         }
         if (ctx >= 0 && ctx < POS_MEM) {
             st.pos_id[ctx] = id + 1;
             st.pos_hash[ctx] = hash;
+            st.pos_hash2[ctx] = hash2;
         }
     }
     prop(m->w, SEL, id);
@@ -267,18 +287,34 @@ static int load(menu_t *m, void *w) {
     }
     /* A recreated page has never seen this surface (COUNT unset) and lost its selection: put the
      * user back where they left off. A live page whose count changed resets the selection but
-     * keeps its viewport, so it does not re-read the table. A non-virtual list prefers the row
-     * with the remembered text and falls back to the remembered index. */
+     * keeps its viewport, so it does not re-read the table. A non-virtual list prefers the
+     * remembered first text, breaks ties by the second text and then by the remembered index,
+     * and falls back to the index when no text matches. */
     if (m->kind != 3 && count < 0) {
         int ctx = context_now();
         int id = ctx >= 0 && ctx < POS_MEM ? st.pos_id[ctx] - 1 : -1;
-        unsigned hash = ctx >= 0 && ctx < POS_MEM ? st.pos_hash[ctx] : 0;
+        unsigned hash = 0, hash2 = 0;
+        if (ctx >= 0 && ctx < POS_MEM) {
+            hash = st.pos_hash[ctx];
+            hash2 = st.pos_hash2[ctx];
+        }
         if (id >= 0 && m->kind == 1 && hash) {
-            for (int i = 0; i < m->n; ++i)
-                if (row_hash(m->at[i]) == hash) {
-                    id = m->id[i];
-                    break;
+            /* A secondary-text match outranks proximity; equal ranks keep the earlier row. */
+            int best = -1, best_dist = 0, best_second = 0;
+            for (int i = 0; i < m->n; ++i) {
+                row_id_t r = row_id(m->at[i]);
+                if (r.one != hash) continue;
+                int dist = m->id[i] - id;
+                if (dist < 0) dist = -dist;
+                int second = hash2 && r.two == hash2;
+                if (best < 0 || second > best_second ||
+                    (second == best_second && dist < best_dist)) {
+                    best = i;
+                    best_dist = dist;
+                    best_second = second;
                 }
+            }
+            if (best >= 0) id = m->id[best];
         }
         if (id >= 0 && id < m->rows) {
             prop(w, SEL, id);
@@ -533,7 +569,10 @@ int ringnav(void *ctx, void *event) {
     int cur = reconcile(&g_menu, touch || !moving(&g_menu));
     unsigned now = (unsigned)time_now_ms();
     if (!dir) {
-        /* Only a second release on the very same screen is a screen-toggle pair. */
+        /* Only a second release on the very same screen is a screen-toggle pair, so a quick
+         * second press while clicking through menus can never darken the screen. The accepted
+         * cost is that after the first press navigated, the second press acts on the new screen
+         * instead of toggling; the README states this limitation. */
         if (st.last_center && now - st.last_center <= DOUBLE_CLICK_MS && st.center_top == top &&
             st.center_surface == w) {
             st.last_center = 0;
