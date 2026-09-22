@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Reproducibly patch only the audited Q2 V1.32 ZIP. Requires LLVM and squashfs-tools."""
+"""Reproducibly patch only the audited Q2 V1.32 ZIP. Requires LLVM and squashfs-tools.
+
+--logo swaps the boot splash JPEG (320x375) in the repacked rootfs.
+"""
 import argparse, hashlib, io, json, pathlib, re, struct, subprocess, tarfile, zipfile
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ZIP_SHA = '154c17822d09be001be35c03d2d3488424dee195221790bd70864480d55b0f00'
@@ -31,6 +34,19 @@ def source_sha256():
 
 def check(condition, message):
     if not condition: raise ValueError(message)
+def jpeg_size(b):
+    """Width and height from the JPEG SOF marker."""
+    i = 2
+    while i + 9 <= len(b):
+        check(b[i] == 0xFF, 'Malformed JPEG')
+        marker = b[i+1]
+        if marker in (0xC0,0xC1,0xC2,0xC3,0xC5,0xC6,0xC7,0xC9,0xCA,0xCB,0xCD,0xCE,0xCF):
+            h, w = struct.unpack_from('>HH', b, i+5)
+            return w, h
+        if marker == 0x01 or marker == 0xD8 or 0xD0 <= marker <= 0xD7: i += 2
+        elif marker == 0xDA: break
+        else: i += 2 + struct.unpack_from('>H', b, i+2)[0]
+    raise ValueError('No JPEG size marker')
 def symbols(p):
     out = {}
     for line in run('readelf', '-Ws', p).splitlines():
@@ -100,7 +116,7 @@ def compile_payload(out):
     run('llvm-objcopy','-O','binary',out/'patch.elf',out/'patch.bin')
     return symbols(out/'patch.elf')
 
-def build(zip_path, out):
+def build(zip_path, out, logo=None):
     out.mkdir(parents=True, exist_ok=True)
     check(not (out/'update.tar').exists(), 'Output already exists; use a fresh --out directory')
     source = source_sha256()
@@ -199,20 +215,30 @@ def build(zip_path, out):
     import shlex
     replacement = b'release/bin/demo F '+b' '.join(old.groups())+b' cat '+shlex.quote(str(out/'demo')).encode()
     p = p[:old.start()]+replacement+p[old.end():]
+    if logo is not None:
+        check(logo.is_file(), f'Logo not found: {logo}')
+        data = logo.read_bytes()
+        check(data[:2] == b'\xff\xd8', 'Logo must be a JPEG')
+        check(jpeg_size(data) == (320, 375), 'Logo must be 320x375 like the stock splash')
+        line = re.search(rb'^release/assets/default/raw/images/xx/logo\.jpg R (\d+) (\d+) (\d+) (\d+) .+$', p, re.M)
+        check(line is not None, 'Missing stock logo inode')
+        replacement = b'release/assets/default/raw/images/xx/logo.jpg F '+b' '.join(line.groups())+b' cat '+shlex.quote(str(logo)).encode()
+        p = p[:line.start()]+replacement+p[line.end():]
     pseudo.write_bytes(p)
     (out/'empty').mkdir()
     newsq = out/'rootfs.squashfs'
     epoch = struct.unpack_from('<I',sq.read_bytes(),8)[0]
     run('mksquashfs',out/'empty',newsq,'-pf',pseudo,'-noappend','-comp','lzo',
         '-b','131072','-Xcompression-level','9','-mkfs-time',epoch,*rootargs,'-processors','1','-no-progress')
-    # Every inode except demo must keep stock name/type/mtime/mode/uid/gid (size/offset fields shift).
+    # Every inode except demo and the logo must keep stock name/type/mtime/mode/uid/gid (size/offset fields shift).
     def inodes(image):
         text = subprocess.check_output(['unsquashfs','-pf','-',str(image)]).split(b'\n# START OF DATA')[0]
         return sorted(l.split()[:6] for l in text.splitlines() if l and not l.startswith((b'#',b'release/bin/demo ')))
     check(inodes(newsq) == inodes(sq), 'Repacked rootfs metadata differs from stock')
     blobs['recovery-update/rootfs.squashfs'] = newsq.read_bytes()
     # Stock image proves this size fits; do not enlarge beyond its padded size.
-    check(len(blobs['recovery-update/rootfs.squashfs']) <= sq.stat().st_size, 'Repacked rootfs exceeds stock size')
+    check(len(blobs['recovery-update/rootfs.squashfs']) <= sq.stat().st_size,
+          'Repacked rootfs exceeds stock size' + ('; the logo JPEG is too large' if logo else ''))
     blobs['firmware_v20.info'] = (f'Shanling Q2\n{VERSION}\n'+''.join(
         hashlib.md5(blobs[n]).hexdigest()+'  '+n+'\n' for n in [
             'recovery-update/xImage','recovery-update/rootfs.squashfs'])).encode()
@@ -229,6 +255,8 @@ def build(zip_path, out):
         version=VERSION, hooks=hooks,
         patch_symbols={n:hex(v) for n,v in ps.items() if n.startswith('stock_')},
         tools={t:run(t,'--version').splitlines()[0] for t in ['clang','ld.lld','llvm-objcopy']})
+    if logo is not None:
+        manifest['logo_sha256'] = sha(logo.read_bytes())
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     print(json.dumps({k:manifest[k] for k in ['update_sha256','patch_bytes','version']},indent=2))
 
@@ -236,5 +264,6 @@ if __name__ == '__main__':
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('zip',type=pathlib.Path)
     ap.add_argument('--out',type=pathlib.Path,default=ROOT/'build')
+    ap.add_argument('--logo',type=pathlib.Path,help='320x375 JPEG boot splash')
     a=ap.parse_args()
-    build(a.zip,a.out.resolve())
+    build(a.zip,a.out.resolve(),a.logo)

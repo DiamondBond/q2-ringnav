@@ -24,6 +24,10 @@ To go back to stock, just flash the official Shanling Q2 V1.32 firmware again.
 
 [Shanling Q2 official firmware](https://en.shanling.com/download/150)
 
+## Custom boot logo
+
+The boot splash can be replaced when building your own firmware — see [docs/boot-logo.md](docs/boot-logo.md). `assets/logo.jpg` is a ready-to-use example.
+
 ## Controls
 
 - Turn the scroll wheel to move through menu items; a fast spin skips further.
