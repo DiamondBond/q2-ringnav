@@ -274,4 +274,7 @@ if __name__ == '__main__':
     ap.add_argument('--logo',type=pathlib.Path,default=ROOT/'assets/logo.jpg',
                     help='320x375 JPEG boot splash (default: assets/logo.jpg)')
     a=ap.parse_args()
-    build(a.zip,a.out.resolve(),a.logo)
+    try:
+        build(a.zip,a.out.resolve(),a.logo)
+    except (OSError, ValueError, zipfile.BadZipFile, subprocess.CalledProcessError) as exc:
+        ap.error(str(exc))
