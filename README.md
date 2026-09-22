@@ -20,7 +20,13 @@ Make sure the Q2 is charged before updating, and don't remove the microSD card w
 
 This is for the **Shanling Q2 on stock V1.32 firmware**.
 
-To go back to stock, just flash the official Shanling Q2 V1.32 firmware again.
+To restore stock firmware while the UI works, flash the official Shanling Q2 V1.32 firmware through **System settings → System Update → TF card update**.
+
+If the UI is not working, use [Shanling's recovery package](https://drive.google.com/file/d/1aINQfJu6n0JTQ4hOzzD1uSpSj3TS_NJj/view?usp=drive_link):
+
+1. Copy the complete `recovery-update` folder to the root of the microSD card.
+2. Hold the previous-song button, then power on the Q2 with the centre button.
+3. The player will automatically check for a firmware update.
 
 [Shanling Q2 official firmware](https://en.shanling.com/download/150)
 
