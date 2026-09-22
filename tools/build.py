@@ -216,7 +216,6 @@ def build(zip_path, out, logo=None):
     replacement = b'release/bin/demo F '+b' '.join(old.groups())+b' cat '+shlex.quote(str(out/'demo')).encode()
     p = p[:old.start()]+replacement+p[old.end():]
     if logo is not None:
-        check(logo.is_file(), f'Logo not found: {logo}')
         data = logo.read_bytes()
         check(data[:2] == b'\xff\xd8', 'Logo must be a JPEG')
         check(jpeg_size(data) == (320, 375), 'Logo must be 320x375 like the stock splash')
@@ -237,8 +236,7 @@ def build(zip_path, out, logo=None):
     check(inodes(newsq) == inodes(sq), 'Repacked rootfs metadata differs from stock')
     blobs['recovery-update/rootfs.squashfs'] = newsq.read_bytes()
     # Stock image proves this size fits; do not enlarge beyond its padded size.
-    check(len(blobs['recovery-update/rootfs.squashfs']) <= sq.stat().st_size,
-          'Repacked rootfs exceeds stock size' + ('; the logo JPEG is too large' if logo else ''))
+    check(len(blobs['recovery-update/rootfs.squashfs']) <= sq.stat().st_size, 'Repacked rootfs exceeds stock size')
     blobs['firmware_v20.info'] = (f'Shanling Q2\n{VERSION}\n'+''.join(
         hashlib.md5(blobs[n]).hexdigest()+'  '+n+'\n' for n in [
             'recovery-update/xImage','recovery-update/rootfs.squashfs'])).encode()
