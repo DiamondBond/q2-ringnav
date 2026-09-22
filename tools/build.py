@@ -171,6 +171,8 @@ def build(zip_path, out):
         hooks[name] = dict(address=hex(address), replacement=replacement, original=raw_demo[off:off+12].hex())
     # Single shared version literal: About display and updater equality check.
     check(patched.count(b'V1.32\0') == 1, 'Version literal is not unique')
+    check(len(VERSION) + 1 == len(b'V1.32\0'),
+          'VERSION must stay 5 characters; a longer literal shifts every later file offset')
     patched = patched.replace(b'V1.32\0', VERSION.encode()+b'\0')
     nulls = [(o,p) for o,p in segments(patched) if p[0] == 0]
     check(len(nulls) == 1 and nulls[0][0] == segments(patched)[-1][0], 'No final PT_NULL slot')

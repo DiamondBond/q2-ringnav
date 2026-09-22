@@ -298,15 +298,16 @@ assert m.get(w+O['SCROLL_Y'])==148 and m.get(w+O['VIEW_ANIMATOR'])==0; passed()
 # Painting establishes selection without a sacrificial button press or native focus.
 m=Machine(); w,entries=m.page_list(5,extent=1000)
 assert m.paint(w)==0 and m.selected(w)==0
-# Default outline: translucent fill, outer and inset one-pixel white strokes, all clipped.
+# Default outline: translucent fill, one dark shade stroke, one white stroke, all clipped.
 assert [r['kind'] for r in m.rounded]==['fill','stroke','stroke']
-fill,outer_,inner_=m.rounded
+fill,shade,white=m.rounded
 assert fill['rect']==(1,1,238,46) and fill['bg']==0 and fill['clip']==(0,0,240,96)
 assert fill['color']==((O['FILL_ALPHA']<<24)|O['FILL_RGB']) and fill['radius']==O['RADIUS'] and fill['width'] is None
-assert outer_['rect']==(1,1,238,46) and outer_['bg']==0 and outer_['color']==0xffffffff
-assert outer_['radius']==O['RADIUS'] and outer_['width']==1 and outer_['clip']==(0,0,240,96)
-assert inner_['rect']==(2,2,236,44) and inner_['bg']==0 and inner_['color']==0xffffffff
-assert inner_['radius']==O['RADIUS']-1 and inner_['width']==1
+assert shade['rect']==(1,1,238,46) and shade['bg']==0
+assert shade['color']==((O['SHADE_ALPHA']<<24)|O['FILL_RGB'])
+assert shade['radius']==O['RADIUS'] and shade['width']==1 and shade['clip']==(0,0,240,96)
+assert white['rect']==(2,2,236,44) and white['bg']==0 and white['color']==0xffffffff
+assert white['radius']==O['RADIUS']-1 and white['width']==1
 assert not m.strokes and m.global_alpha==0
 assert m.clip==(0,0,240,240)
 assert m.get(m.lcd+O['LCD_FILL_COLOR'])==0x9abcdef0 and m.get(m.lcd+O['LCD_STROKE_COLOR'])==0x12345678
@@ -541,7 +542,8 @@ m.word(m.canvas+O['CANVAS_X'],7); m.word(m.canvas+O['CANVAS_Y'],20)
 for off,val in [(0x10,10),(0x14,30),(0x18,229),(0x1c,199)]: m.word(m.canvas+off,val)
 m.paint(w)
 assert not m.rounded and [s[:4] for s in m.strokes]==[(8,21,238,18),(9,22,236,16)]
-assert m.strokes[0][4:]==((10,30,220,86),0xffffffff)
+assert m.strokes[0][4:]==((10,30,220,86),((O['SHADE_ALPHA']<<24)|O['FILL_RGB']))
+assert m.strokes[1][4:]==((10,30,220,86),0xffffffff)
 assert [m.get(m.canvas+off) for off in (0x10,0x14,0x18,0x1c)]==[10,30,229,199]
 assert m.get(m.lcd+O['LCD_STROKE_COLOR'])==0x12345678; passed()
 # Centre and rapid wheel reversals retain the selected item during an unfinished wheel glide.
@@ -563,8 +565,8 @@ m.paint(w)
 assert m.selected(w)==0 and [r['kind'] for r in m.rounded]==['fill','stroke','stroke']
 assert m.rounded[0]['rect']==(1,1,238,138) and all(r['clip']==(0,0,240,96) for r in m.rounded); passed()
 
-# Small rows keep the square double stroke; the rounded path starts only when both outer
-# dimensions exceed 2*RADIUS. Tiny rows are skipped outright, never with negative sizes.
+# Small rows keep the square shade-plus-white outline; the rounded path starts only when both
+# outer dimensions exceed 2*RADIUS. Tiny rows are skipped outright, never with negative sizes.
 for ww,hh in [(240,20),(20,48),(6,6),(21,21)]:
     m=Machine(); w=m.page(); m.word(w+O['W_H'],96)
     e=m.entry(w,0); m.word(e+O['W_W'],ww); m.word(e+O['W_H'],hh); m.nodes[w]['children']=[e]
@@ -573,6 +575,7 @@ for ww,hh in [(240,20),(20,48),(6,6),(21,21)]:
         assert [r['kind'] for r in m.rounded]==['fill','stroke','stroke'] and not m.strokes,(ww,hh,m.rounded,m.strokes)
     else:
         assert not m.rounded and [s[:4] for s in m.strokes]==[(1,1,ww-2,hh-2),(2,2,ww-4,hh-4)]
+        assert [s[5] for s in m.strokes]==[((O['SHADE_ALPHA']<<24)|O['FILL_RGB']),0xffffffff]
     assert m.global_alpha==0 and m.clip==(0,0,240,240)
     assert m.get(m.lcd+O['LCD_STROKE_COLOR'])==0x12345678; passed()
 m=Machine(); w=m.page(); m.word(w+O['W_H'],96)
@@ -607,6 +610,8 @@ m.paint(a); assert [r['kind'] for r in m.rounded]==['fill','stroke','stroke']; p
 m=Machine(); w,es=m.page_list(3,extent=1000); m.rounded_fail=True
 m.paint(w)
 assert [r['kind'] for r in m.rounded]==['fill','stroke'] and [s[:4] for s in m.strokes]==[(1,1,238,46),(2,2,236,44)]
+assert m.rounded[1]['color']==((O['SHADE_ALPHA']<<24)|O['FILL_RGB'])
+assert [s[5] for s in m.strokes]==[((O['SHADE_ALPHA']<<24)|O['FILL_RGB']),0xffffffff]
 assert m.get(m.lcd+O['LCD_FILL_COLOR'])==0x9abcdef0 and m.get(m.lcd+O['LCD_STROKE_COLOR'])==0x12345678
 assert m.global_alpha==0 and m.clip==(0,0,240,240); passed()
 
