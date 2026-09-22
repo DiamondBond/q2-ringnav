@@ -105,10 +105,8 @@ static int wheel_step(int dir, unsigned now) {
         st.wheel_run = 1;
     st.last_wheel = now;
     st.wheel_dir = dir;
-    int step = 1;
-    for (unsigned run = st.wheel_run; run >= ACCEL_DIV && step < ACCEL_MAX; run -= ACCEL_DIV)
-        step *= 2;
-    return step;
+    unsigned run = st.wheel_run / ACCEL_DIV;
+    return run < 3 ? 1 << run : ACCEL_MAX; /* 3 = log2(ACCEL_MAX) */
 }
 
 /* A tap target has an EVT_CLICK handler. V1.32 widget emitter @0x60; emitter_on_with_tag items are
@@ -276,7 +274,7 @@ static int load(menu_t *m, void *w) {
      * user back where they left off. A live page whose count changed resets the selection but
      * keeps its viewport, so it does not re-read the table. A non-virtual list prefers the row
      * with the remembered text and falls back to the remembered index. */
-    if (m->kind != 3 && count < 0 && widget_get_prop_int(w, SEL, -1) < 0) {
+    if (m->kind != 3 && count < 0) {
         unsigned hash = 0;
         int id = recall(context_now(), &hash);
         if (id >= 0 && m->kind == 1 && hash) {

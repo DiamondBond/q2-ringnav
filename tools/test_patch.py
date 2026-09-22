@@ -161,6 +161,16 @@ class Machine:
         es=[self.entry(w,i*48) for i in range(n)]
         self.nodes[w]['children']=es
         return w,es
+    def table_page(self,n=4,rows=20,height=96):
+        """A table_client page of n recycled rows; returns (surface, row widgets, entries)."""
+        w=self.page('allmusic_page','table_client')
+        self.word(w+O['ROW_HEIGHT'],48); self.word(w+O['TABLE_ROWS'],rows); self.word(w+O['W_H'],height)
+        rs=[self.node('table_row') for _ in range(n)]
+        es=[self.entry(r) for r in rs]; self.nodes[w]['children']=rs
+        for j,(r,e) in enumerate(zip(rs,es)):
+            self.nodes[r]['children']=[e]; self.word(r+O['W_PARENT'],w)
+            self.word(r+O['ROW_INDEX'],j); self.word(r+O['W_Y'],j*48)
+        return w,rs,es
     def moved(self): return [x for x in self.calls if x[0] in ('scroll_view_scroll_delta_to','table_client_scroll_to','slide_menu_scroll_to_next','slide_menu_scroll_to_prev')]
     def dispatched(self): return [x for x in self.calls if x[0]=='stock_dispatch']
 
@@ -263,11 +273,7 @@ m.on_click=destroy
 assert m.call(O['KEY_CENTER'])==11 and len(m.dispatched())==1; passed()
 
 # Recycle a small row pool: selection belongs to the logical index, never the widget.
-m=Machine(); w=m.page('allmusic_page','table_client')
-m.word(w+O['ROW_HEIGHT'],48); m.word(w+O['TABLE_ROWS'],20); m.word(w+O['W_H'],96)
-rows=[m.node('table_row') for _ in range(4)]
-entries=[m.entry(r) for r in rows]; m.nodes[w]['children']=rows
-for r,e in zip(rows,entries): m.nodes[r]['children']=[e]; m.word(r+O['W_PARENT'],w)
+m=Machine(); w,rows,entries=m.table_page()
 def rebind(a,offset):
     start=offset//48
     for j,r in enumerate(rows):
@@ -367,22 +373,12 @@ m.nodes[w]['children']=es[:6]; m.word(w+O['VIEW_CONTENT_H'],6*48); m.word(w+O['S
 m.paint(w); assert m.selected(w)==0; passed()
 
 # Virtual music tables recall a logical row and scroll to it on recreation.
-m=Machine(); w=m.page('allmusic_page','table_client')
-m.word(w+O['ROW_HEIGHT'],48); m.word(w+O['TABLE_ROWS'],20); m.word(w+O['W_H'],96)
-rows=[m.node('table_row') for _ in range(4)]
-entries=[m.entry(r) for r in rows]; m.nodes[w]['children']=rows
-for j,(r,e) in enumerate(zip(rows,entries)):
-    m.nodes[r]['children']=[e]; m.word(r+O['W_PARENT'],w); m.word(r+O['ROW_INDEX'],j); m.word(r+O['W_Y'],j*48)
+m=Machine(); w,_,entries=m.table_page()
 m.paint(w)
 for _ in range(2): assert m.call()==11
 assert m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==48
 m.rebind=None
-w2=m.page('allmusic_page','table_client')
-m.word(w2+O['ROW_HEIGHT'],48); m.word(w2+O['TABLE_ROWS'],20); m.word(w2+O['W_H'],96)
-rows2=[m.node('table_row') for _ in range(4)]
-entries2=[m.entry(r) for r in rows2]; m.nodes[w2]['children']=rows2
-for j,(r,e) in enumerate(zip(rows2,entries2)):
-    m.nodes[r]['children']=[e]; m.word(r+O['W_PARENT'],w2); m.word(r+O['ROW_INDEX'],j); m.word(r+O['W_Y'],j*48)
+w2,_,entries2=m.table_page()
 m.paint(w2); assert m.selected(w2)==2 and m.get(w2+O['TABLE_TOP'])==48
 assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==entries2[2]; passed()
 
