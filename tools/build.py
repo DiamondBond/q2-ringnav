@@ -19,6 +19,16 @@ HOOKS = {
 def run(*args):
     return subprocess.check_output([str(a) for a in args], text=True)
 def sha(b): return hashlib.sha256(b).hexdigest()
+
+def source_sha256():
+    """Hash every build input, so a test run cannot silently use a stale output directory."""
+    h = hashlib.sha256()
+    for rel in ['patch/contexts.inc', 'patch/link.ld', 'patch/offsets.inc', 'patch/ringnav.c',
+                'patch/trampoline.S', 'tools/build.py']:
+        h.update(rel.encode() + b'\0')
+        h.update((ROOT/rel).read_bytes())
+    return h.hexdigest()
+
 def check(condition, message):
     if not condition: raise ValueError(message)
 def symbols(p):
@@ -76,6 +86,7 @@ GLOBALS = ['g_backlight_status', 'g_lockscreen_pageflag', 'g_testmode_flag',
 def build(zip_path, out):
     out.mkdir(parents=True, exist_ok=True)
     check(not (out/'update.tar').exists(), 'Output already exists; use a fresh --out directory')
+    source = source_sha256()
     raw = zip_path.read_bytes()
     check(sha(raw) == ZIP_SHA, 'Unsupported ZIP: SHA-256 differs from audited original')
     with zipfile.ZipFile(io.BytesIO(raw)) as z:
@@ -93,11 +104,24 @@ def build(zip_path, out):
     sq = out/'stock.squashfs'; sq.write_bytes(blobs['recovery-update/rootfs.squashfs'])
     raw_demo = subprocess.check_output(['unsquashfs','-cat',str(sq),'release/bin/demo'])
     check(sha(raw_demo) == DEMO_SHA, 'Unsupported demo binary')
-    # Every allowlisted context must exist in this exact stock binary.
+    # Every allowlisted context must be a window name. The runtime name is the root "name"
+    # property of the UI asset, not the asset path, so check the stock rootfs assets directly:
+    # a prefix-trimmed typo cannot silently disable a screen this way.
     contexts = re.findall(r'"([^"]+)"', (ROOT/'patch/contexts.inc').read_text())
     check(contexts, 'No navigation contexts audited')
+    windows = set()
+    for line in run('unsquashfs', '-l', sq).splitlines():
+        found = re.search(r'/raw/ui/(.+)\.bin$', line)
+        if not found: continue
+        rel = found.group(1)
+        data = subprocess.check_output(['unsquashfs', '-cat', str(sq),
+                                        'release/assets/default/raw/ui/'+rel+'.bin'])
+        i = data.find(b'name\x00')
+        name = data[i+5:data.find(b'\x00', i+5)].decode('utf-8', 'replace') if i >= 0 else ''
+        windows.add(name or rel.split('/')[-1])
+    check(windows, 'No UI assets in the stock rootfs')
     for name in contexts:
-        check(name.encode()+b'\0' in raw_demo, f'Context {name} is absent from the stock binary')
+        check(name in windows, f'Context {name} is not a window name in the stock rootfs')
     demo = out/'stock-demo'; demo.write_bytes(raw_demo)
     syms = symbols(demo)
     header = [f'#define RING_STEP {RING_STEP}']
@@ -187,7 +211,7 @@ def build(zip_path, out):
             data = blobs.get(m.name)
             if data is not None: m.size=len(data)
             t.addfile(m,io.BytesIO(data) if data is not None else None)
-    manifest = dict(input_zip_sha256=ZIP_SHA, stock_demo_sha256=DEMO_SHA,
+    manifest = dict(input_zip_sha256=ZIP_SHA, stock_demo_sha256=DEMO_SHA, source_sha256=source,
         demo_sha256=sha(patched), patch_sha256=sha(payload), update_sha256=sha((out/'update.tar').read_bytes()),
         rootfs_sha256=sha(newsq.read_bytes()), kernel_sha256=sha(blobs['recovery-update/xImage']),
         hook_address=hex(HOOK), hook_file_offset=hex(hookoff), patch_address=hex(BASE),

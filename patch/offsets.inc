@@ -1,0 +1,37 @@
+/* Stock V1.32 layout and ABI constants shared by patch/ringnav.c and tools/test_patch.py.
+ * The test harness parses this file, so a field change cannot leave the mocks behind.
+ * Fields marked "same slot" are class-specific views of one offset. */
+#define W_X 0x00
+#define W_Y 0x04
+#define W_W 0x08
+#define W_H 0x0c
+#define W_FOCUS 0x24            /* stock focused flag byte (tests) */
+#define W_PARENT 0x48
+#define W_EMITTER 0x60
+#define EMIT_TYPE 0x08
+#define EMIT_PENDING_REMOVE 0x15
+#define EMIT_NEXT 0x20
+#define ROW_HEIGHT 0x78         /* table_client row height */
+#define ROW_INDEX 0x78          /* table_row logical index (same slot) */
+#define SLIDE_INDEX 0x78        /* slide_menu current index (same slot) */
+#define TABLE_ROWS 0x7c         /* table_client logical row count */
+#define VIEW_CONTENT_H 0x7c     /* scroll_view content height (same slot) */
+#define SCROLL_X 0x80           /* scroll_view horizontal offset */
+#define TABLE_TOP 0x80          /* table_client viewport top (same slot) */
+#define SCROLL_Y 0x84           /* scroll_view viewport top */
+#define VIEW_VERTICAL 0x91
+#define VIEW_HORIZONTAL 0x92
+#define TABLE_ANIMATOR 0xd0
+#define VIEW_ANIMATOR 0xe8
+#define EVENT_TYPE 0x00
+#define EVENT_KEY 0x18
+#define EVT_CLICK 0x10c
+#define CANVAS_X 0x00
+#define CANVAS_Y 0x04
+#define CANVAS_LCD 0x38
+#define LCD_STROKE_COLOR 0xc0
+#define KEY_CENTER 218
+#define KEY_PREV 172
+#define KEY_NEXT 173
+#define KEY_PLAY 171
+#define BOOT_KEY_GUARD 0xa37c8a /* raw flag address, no symbol in the audited binary */
