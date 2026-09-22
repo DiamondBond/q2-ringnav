@@ -1,91 +1,92 @@
-# Q2 ring navigation (V1.32 → V1.4R)
+# Q2 ring navigation (V1.32 → V1.5R)
 
-Lets the Shanling Q2 touch ring scroll lists and the home carousel. Volume control
-stays wherever navigation isn't suitable.
+Adds wheel selection to Shanling Q2 menus while keeping native touchscreen navigation.
 
-Release: `dist/Q2 Firmware V1.4R.zip` (same layout as the stock ZIP).
+Release candidate: `dist/Q2 Firmware V1.5R.zip` (same layout as the stock ZIP).
+**Device validation is still pending.** Emulation covers input, selection and the stock canvas
+routines, not the complete UI or physical button mapping.
 
-| file | sha256 |
-|---|---|
-| `Q2 Firmware V1.4R.zip` | `6c6a50f5781d444a2eb3ae270b490156b89bc008c6e6707e15d9c51138583cf8` |
-| `update.tar` | `f69c469bdbfae16995f5b169ebfc0d6cd257721bc4041e7147ae2fa0fdd051e0` |
+## Controls
 
-Every other hash, address and tool version is in `dist/manifest.json`.
+- Menus show a two-pixel white outline around the selected entry, independent of the red
+  currently-playing indication and native touch focus. Selection initializes on the first paint.
+- Turning the ring moves one entry at a time and keeps it visible. Ordinary lists use the stock
+  300 ms glide; recycled `table_client` rows use immediate scrolling and logical row indices.
+- A short centre press opens the selected entry. This uses key **218**, the stock screen-toggle
+  key, rather than key 171 (the separate Play/Pause action used incorrectly by V1.4R).
+- Tapping another entry updates selection **before** its native action runs. If the tap leaves
+  the menu open, centre opens the entry just tapped. No extra tap is required.
+- Swiping keeps native scrolling and momentum. Selection survives while visible; after settling,
+  an offscreen selection moves to the first fully visible selectable entry. Oversized entries
+  fall back to the first partially visible one.
+- Turning the wheel during touch momentum stops it at its current position and resumes menu
+  navigation. Wheel and centre input during an active finger gesture are consumed without
+  queuing an action. Touch-down interrupts an outstanding wheel glide.
+- Returning to a surviving menu preserves a valid selection. Recreated menus start with their
+  first visible entry; changing the entry count resets selection. No widget pointers survive
+  between events, so recycled table rows cannot carry selection to an unrelated logical row.
+- Outside supported menus, centre retains stock screen toggle and the wheel retains stock volume
+  behavior. Play/Pause and long-press power behavior remain stock. Empty supported menus consume
+  centre without opening anything or turning the screen off.
 
-Install it the same way as a stock update. To go back, flash the stock V1.32 package. The version
-label changed from `V1.32` to `V1.4R` because the updater refuses to install a package whose version
-equals the one already installed; the new label also makes this build installable over the earlier
-`V1.3R` one.
+## Install and compatibility
 
-## What changed
+Install like a stock update. Flash stock V1.32 to revert. The About screen and updater share the
+`V1.5R` version literal; changing it allows installation over V1.4R, since the updater refuses an
+identical version label. Only the audited V1.32 base firmware is supported.
 
-Only `release/bin/demo` inside `rootfs.squashfs` changed. The kernel (`xImage`) is byte-identical.
-The build checks that every other inode keeps its stock name, type, mtime, mode, uid and gid.
+Release hashes and build details are in `dist/manifest.json`.
 
-In `demo`:
+## Implementation
 
-1. **Hook:** `on_wm_keyup_before_fun` (0x4e85c8) is AWTK's key-up filter. Its first two
-   instructions become `j ringnav; nop`. `patch/trampoline.S` re-creates the `$gp` value they set
-   up, then resumes at 0x4e85d4, so the stock filter still runs first and unchanged.
-2. **Payload:** `patch/ringnav.c` (5624 bytes, loaded at 0xb00000) goes in the unused final
-   `PT_NULL` program header, which becomes a new R+X `PT_LOAD`. It calls stock AWTK functions by
-   address via `$t9`.
-3. **Version:** the single `V1.32\0` literal becomes `V1.4R\0`. The About screen and the updater
-   share it.
+Only `release/bin/demo` inside `rootfs.squashfs` changes. The kernel is byte-identical, and the
+builder checks every other inode's name, type, mtime, mode, uid and gid against stock.
 
-The ring driver already turns motion into key codes 172/173 (volume). `ringnav` intercepts them
-only when all of these hold:
-- the stock filter didn't consume the key
-- the screen is on, and no lock, test, guide, power-off, USB-link or Bluetooth-receive screen is showing
-- the top window's name is in `patch/contexts.inc` (settings, library, folders, queue, Tidal, home)
-- exactly one visible, enabled `slide_menu`, `table_client` or vertical non-snapping `scroll_view` exists.
-  For `pages` widgets, only the active page is searched.
+Four checked MIPS prologues redirect into a read/execute payload at `0xb00000`, using the final
+unused `PT_NULL` program header. Trampolines restore the stock GOT base and resume each original
+function after its PIC setup:
 
-When those hold it walks the list one entry per detent, keeps a native AWTK focused widget on the
-entry the wheel is on, and glides the list with AWTK's own per-item animated scroll
-(`scroll_view_scroll_delta_to`, 300 ms) so that entry stays fully visible. Tap targets
-are the widgets that carry an `EVT_CLICK` handler, the same ones a finger would hit. A short center
-Play/Pause press then activates the focused entry with the same async `EVT_CLICK` that
-`widget_on_keyup` dispatches (`pointer_event_init` + `widget_dispatch_async`), so menus, lists and
-the home carousel are selected without faking touch coordinates. The home `slide_menu` uses its
-native `value` (index @0x78); `table_client` rows are selected by row index (@0x78) because the
-visible rows are re-bound on every scroll. If a `scroll_view`/`table_client` has no tap targets or
-no entry is focused yet, the center key still falls through to stock play/pause.
+| Stock callback | Address | Purpose |
+|---|---|---|
+| `on_wm_keyup_before_fun` | `0x4e85c8` | Stock lock filter first, then wheel/centre navigation |
+| `on_wm_tsdown_before_fun` | `0x4e8bd0` | Preserve stock touch processing and interrupt wheel glide |
+| `widget_on_paint_border` | `0x6596a0` | Draw the selected entry outline after native children |
+| `widget_dispatch` | `0x65e0ec` | Observe a native click before its app callback changes the UI |
 
-The ring is consumed at list ends, so hitting the end never changes volume, and it is also consumed
-during window animation and touch drags. All other screens get stock volume behaviour, including
-playing, volume, EQ and screensaver, and play/pause from the center key is untouched everywhere
-outside `patch/contexts.inc` — in particular on Now Playing.
+Selection is stored in widget-owned integer properties on the navigation surface, independently
+of AWTK's focused flag. The outline and centre action resolve that same logical selection against
+the current entries. Centre dispatches a synchronous native `EVT_CLICK`, so a queued click cannot
+hit a row rebound between selection and delivery. It never dereferences the target after delivery.
+The canvas hook intersects the existing clip with the viewport and restores both clip and stroke
+color; this firmware's `canvas_save/restore` do not save those properties.
 
-## Build
+Navigation requires a supported top-window name from `patch/contexts.inc`, screen-on and no
+lock/test/guide/power-off/USB-link/Bluetooth-receive screen, and exactly one visible enabled
+navigation surface. Only active `pages` children are searched. Horizontal and page-snapping scroll
+views remain native. The bounded walk collects at most 256 targets in a non-virtual list; virtual
+music tables navigate by total logical row count instead.
 
-Needs clang/lld/llvm-objcopy, squashfs-tools 4.7 (tested 4.7.5) and the original ZIP
-(sha256 `154c17822d09be001be35c03d2d3488424dee195221790bd70864480d55b0f00`). The build refuses any other input.
+## Build and validation
 
-    python3 tools/build.py 'Q2 Firmware V1.32.zip' --out /tmp/q2   # fresh dir required
+Requires clang/lld/llvm-objcopy, squashfs-tools 4.7 (tested 4.7.5), and the original ZIP:
+`154c17822d09be001be35c03d2d3488424dee195221790bd70864480d55b0f00` (SHA-256).
 
-## Validation
+```sh
+python3 tools/build.py 'Q2 Firmware V1.32.zip' --out /tmp/q2-build
+python3 tools/test_patch.py /tmp/q2-build  # requires unicorn==2.1.4
+```
 
-- **Emulation test:** `tools/test_patch.py <outdir>` (needs `unicorn==2.1.4`) runs the real
-  patched `demo` machine code in Unicorn with mocked AWTK services. It covers 109 scenarios:
-  - scrolling and clamping in both directions
-  - empty lists
-  - blocked screens and flags
-  - animation/touch
-  - ambiguous or hidden panes
-  - one-entry-at-a-time focus tracking and the stock 300 ms animated delta glide
-  - a short center press dispatching the native async `EVT_CLICK` to the focused entry
-  - center falling through to stock play/pause until something is focused
-  - `table_client` row-index selection across a re-bound row
-  - `slide_menu` value selection
-  - retargeting an in-flight scroll instead of tearing it down
-  - non-ring keys
-  - the stock `get_direction` wraparound
-  - stock vs patched results for every key-lock mode × backlight × key
+The suite executes the actual patched MIPS payload and stock key/touch filters. UI services are
+mocked; a separate scenario executes the stock canvas clip/color/rectangle code down to a mocked
+LCD sink. Checks cover touch reselection, gesture suppression, momentum handoff, interrupted and
+reversed wheel glides, recycled rows, menu return, count changes, empty/oversized rows, preserved
+Play/Pause, power-release exclusions and stock key-lock parity. Every call checks preserved
+registers/stack, and native calls check the PIC `$t9` convention.
 
-  It also asserts that PIC calls get `$t9` and that callee-saved registers and the stack survive.
-- **Reproducibility:** two fresh builds gave byte-identical `update.tar` files.
-- **Package checks:** the MD5 list in `firmware_v20.info` matches the files. The rootfs listing
-  differs from stock only in `demo`'s size. The rootfs (50434048 B) is no larger than stock
-  (50442240 B), and the NAND rootfs partition is 247 MiB.
-- **Not done:** no test on real hardware. The emulation mocks AWTK instead of running the full UI.
+Two fresh builds must produce identical `update.tar` files. Packaging verifies MD5 entries,
+unchanged kernel and rootfs metadata, and a rootfs no larger than stock.
+
+Before distributing as hardware-verified, check a Q2 on Home, Local Songs, folders and settings:
+wheel → tap another item → centre; wheel → swipe → settle → centre; swipe → wheel during momentum;
+rapid wheel reversals; return from a submenu; and screen-off wake, Play/Pause and long-press power.
+Confirm the outline follows the item actually opened and the physical centre emits the expected key.

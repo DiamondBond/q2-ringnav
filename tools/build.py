@@ -6,6 +6,12 @@ ZIP_SHA = '154c17822d09be001be35c03d2d3488424dee195221790bd70864480d55b0f00'
 DEMO_SHA = '2c5f06142850b4fc168f82b44a81550cce0a5b4b9fe1c179dced4a08a3049138'
 BASE = 0xb00000
 HOOK = 0x4e85c8
+HOOKS = {
+    'on_wm_keyup_before_fun': (HOOK, 'ringnav'),
+    'on_wm_tsdown_before_fun': (0x4e8bd0, 'ringnav_touch'),
+    'widget_on_paint_border': (0x6596a0, 'ringnav_paint'),
+    'widget_dispatch': (0x65e0ec, 'ringnav_dispatch'),
+}
 
 def run(*args):
     return subprocess.check_output([str(a) for a in args], text=True)
@@ -43,8 +49,14 @@ FUNCTIONS = {
  'widget_get_type': ('const char *', 'void *'),
  'widget_count_children': ('unsigned', 'void *'),
  'widget_get_child': ('void *', 'void *, unsigned'),
- 'widget_set_focused_internal': ('int', 'void *, int'),
- 'widget_dispatch_async': ('int', 'void *, void *'),
+ 'widget_set_prop_int': ('int', 'void *, const char *, int'),
+ 'widget_invalidate_force': ('int', 'void *, void *'),
+ 'widget_animator_pause': ('int', 'void *'),
+ 'widget_animator_destroy': ('int', 'void *'),
+ 'canvas_get_clip_rect': ('int', 'void *, void *'),
+ 'canvas_set_clip_rect': ('int', 'void *, const void *'),
+ 'canvas_set_stroke_color': ('int', 'void *, unsigned'),
+ 'canvas_stroke_rect': ('int', 'void *, int, int, int, int'),
  'pointer_event_init': ('void *', 'void *, int, void *, int, int'),
  'slide_menu_scroll_to_next': ('int', 'void *'),
  'slide_menu_scroll_to_prev': ('int', 'void *'),
@@ -53,7 +65,8 @@ FUNCTIONS = {
  'scroll_view_scroll_delta_to': ('int', 'void *, int, int, int'),
 }
 GLOBALS = ['g_backlight_status', 'g_lockscreen_pageflag', 'g_testmode_flag',
-           'g_guideflag', 'g_poweroff_state', 'g_usblink_status', 'bt__recv_pageflag']
+           'g_guideflag', 'g_poweroff_state', 'g_usblink_status', 'bt__recv_pageflag',
+           'g_power_longkey', 'g_ingore_bootkey_flag']
 
 def build(zip_path, out, step):
     out.mkdir(parents=True, exist_ok=True)
@@ -81,6 +94,9 @@ def build(zip_path, out, step):
     header = ['#define RING_STEP '+str(step),
               'extern int stock_keyup_trampoline(void *, void *);',
               '#define stock_keyup stock_keyup_trampoline']
+    for name in ('touch', 'paint', 'dispatch'):
+        header += [f'extern int stock_{name}_trampoline(void *, void *);',
+                   f'#define stock_{name} stock_{name}_trampoline']
     for name,(ret,args) in FUNCTIONS.items():
         header.append(f'#define {name} (({ret} (*)({args}))0x{syms[name]:x}u)')
     for name in GLOBALS:
@@ -100,11 +116,21 @@ def build(zip_path, out, step):
     check(len(payload) < 65536, 'Unexpected patch size')
     patched = bytearray(raw_demo)
     hookoff = fileoff(patched, HOOK)
-    check(patched[hookoff:hookoff+12].hex() == '54001c3cf8e69c2721e09903', 'Unexpected hook instructions')
-    patched[hookoff:hookoff+8] = struct.pack('<II', 0x08000000|(ps['ringnav']>>2), 0)
+    hooks = {}
+    for name, (address, replacement) in HOOKS.items():
+        check(syms[name] == address, f'{name}: callback address mismatch')
+        off = fileoff(patched, address)
+        prolog = struct.unpack_from('<III', patched, off)
+        check(prolog[0] >> 16 == 0x3c1c and prolog[1] >> 16 == 0x279c and
+              prolog[2] == 0x0399e021, f'{name}: unexpected PIC prologue')
+        low = prolog[1] & 65535
+        gp = ((prolog[0] & 65535) << 16) + (low if low < 32768 else low - 65536) + address
+        check(gp == 0xa26cc0, f'{name}: unexpected GOT base')
+        patched[off:off+8] = struct.pack('<II', 0x08000000 | (ps[replacement] >> 2), 0)
+        hooks[name] = dict(address=hex(address), replacement=replacement, original=raw_demo[off:off+12].hex())
     # Single shared version literal: About display and updater equality check.
     check(patched.count(b'V1.32\0') == 1, 'Version literal is not unique')
-    patched = patched.replace(b'V1.32\0', b'V1.4R\0')
+    patched = patched.replace(b'V1.32\0', b'V1.5R\0')
     nulls = [(o,p) for o,p in segments(patched) if p[0] == 0]
     check(len(nulls) == 1 and nulls[0][0] == segments(patched)[-1][0], 'No final PT_NULL slot')
     check(all(p[2]+p[5] < BASE for _,p in segments(patched) if p[0] == 1), 'Patch mapping overlaps')
@@ -143,7 +169,7 @@ def build(zip_path, out, step):
     blobs['recovery-update/rootfs.squashfs'] = newsq.read_bytes()
     # Stock image proves this size fits; do not enlarge beyond its padded size.
     check(len(blobs['recovery-update/rootfs.squashfs']) <= sq.stat().st_size, 'Repacked rootfs exceeds stock size')
-    blobs['firmware_v20.info'] = ('Shanling Q2\nV1.4R\n'+''.join(
+    blobs['firmware_v20.info'] = ('Shanling Q2\nV1.5R\n'+''.join(
         hashlib.md5(blobs[n]).hexdigest()+'  '+n+'\n' for n in [
             'recovery-update/xImage','recovery-update/rootfs.squashfs'])).encode()
     with tarfile.open(out/'update.tar','w',format=tarfile.GNU_FORMAT) as t:
@@ -156,7 +182,7 @@ def build(zip_path, out, step):
         rootfs_sha256=sha(newsq.read_bytes()), kernel_sha256=sha(blobs['recovery-update/xImage']),
         hook_address=hex(HOOK), hook_file_offset=hex(hookoff), patch_address=hex(BASE),
         patch_file_offset=hex(appendoff), patch_bytes=len(payload), ring_step_pixels=step,
-        version='V1.4R', functions={n:hex(syms[n]) for n in FUNCTIONS},
+        version='V1.5R', hooks=hooks, functions={n:hex(syms[n]) for n in FUNCTIONS},
         globals={n:hex(syms[n]) for n in GLOBALS}, patch_symbols={n:hex(v) for n,v in ps.items()},
         tools={t:run(t,'--version').splitlines()[0] for t in ['clang','ld.lld','llvm-objcopy']})
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')

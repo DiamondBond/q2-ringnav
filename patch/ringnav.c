@@ -1,15 +1,8 @@
-/* Q2 V1.32: run on the UI thread, after the stock key-up lock filter.
- *
- * Ring navigation keeps a native AWTK focused widget on the list entry the wheel is on, glides the
- * list with the stock animated per-item scroll so that entry stays fully visible, and lets a short
- * center Play/Pause press activate it with the same async EVT_CLICK that widget_on_keyup dispatches
- * for the focused widget. Everywhere else (playing, volume, ...) the center key keeps its stock
- * play/pause behaviour.
- */
+/* Logical menu selection is independent of native touch focus. Stock code owns gestures. */
 #include "stock.h"
 #define STOP 11
 #define EVT_CLICK 0x10c
-#define KEY_PLAY 171
+#define KEY_CENTER 218
 #define KEY_PREV 172
 #define KEY_NEXT 173
 #define GLIDE_MS 300
@@ -71,9 +64,6 @@ static int clickable(void *w) {
     return 0;
 }
 
-/* widget_set_focused_internal keeps the focused flag in bit 7 of the u16 at 0x24. */
-static int focused(void *w) { return B(w, 0x24) & 0x80; }
-
 typedef struct { void **at; int n, cap, budget; } entries_t;
 
 /* Visible, enabled tap targets in pre-order; a target's descendants belong to it.
@@ -93,133 +83,236 @@ static void *first_entry(void *w) {
     return one;
 }
 
-/* Exactly what V1.32 widget_on_keyup does for an activate key on the focused widget. */
-static void activate(void *w) {
-    char click[0x30];
-    widget_dispatch_async(w, pointer_event_init(click, EVT_CLICK, w, 0, 0));
+/* Widget-owned properties die with the surface; never retain recycled row pointers. */
+#define SEL "_ringnav_index"
+#define TOUCH "_ringnav_touch"
+#define COUNT "_ringnav_count"
+
+typedef struct { int x, y, w, h; } rect_t;
+typedef struct {
+    void *w, *at[MAX_ENTRIES];
+    int id[MAX_ENTRIES], n, kind, rows, row, top, height;
+} menu_t;
+
+static int usable(void) {
+    return g_backlight_status && !g_lockscreen_pageflag && !g_testmode_flag &&
+        !g_guideflag && !g_poweroff_state && g_usblink_status != 2 && !bt__recv_pageflag;
 }
 
-/* Focus without widget_ensure_visible_in_viewport's instant viewport jump; the surface glides below. */
-static void set_focus(void *old, void *w) {
-    if (old && old != w) widget_set_focused_internal(old, 0);
-    widget_set_focused_internal(w, 1);
+static void *surface(void) {
+    if (!usable()) return (void *)0;
+    void *wm = window_manager(), *top = window_manager_get_top_window(wm);
+    if (!top || window_manager_is_animating(wm) ||
+        !allowed(widget_get_prop_str(top, "name", (void *)0))) return (void *)0;
+    void *w = (void *)0;
+    int count = 0, budget = 512;
+    find_surface(top, &w, &count, 0, &budget);
+    return count == 1 ? w : (void *)0;
 }
 
-/* Top edge of w in the coordinate space of ancestor surface. */
-static int widget_y(void *w, void *surface) {
-    int y = 0;
-    for (void *p = w; p && p != surface; p = P(p, 0x48)) y += I(p, 4);
-    return y;
+static int kind(void *w) {
+    const char *t = widget_get_type(w);
+    if (eq(t, "slide_menu")) return 3;
+    if (eq(t, "table_client")) return 2;
+    return eq(t, "scroll_view") && B(w, 0x91) && !B(w, 0x92) ? 1 : 0;
 }
 
-/* dir -1/+1 moves the selection and glides it into view, 0 activates it. Returns 0 when the
- * surface has no tap targets so the caller can fall through to a plain pixel scroll. */
-static int list_nav(void *w, int dir) {
-    void *at[MAX_ENTRIES];
-    entries_t s = { at, 0, MAX_ENTRIES, 2048 };
+static void prop(void *w, const char *name, int value) {
+    if (widget_get_prop_int(w, name, -1) != value) widget_set_prop_int(w, name, value);
+}
+
+static int load(menu_t *m, void *w) {
+    m->w = w; m->n = 0; m->kind = kind(w); m->height = I(w, 0x0c);
+    if (!m->kind || m->height <= 0) return 0;
+    m->top = m->kind == 3 ? 0 : I(w, m->kind == 2 ? 0x80 : 0x84);
+    m->row = m->kind == 2 ? I(w, 0x78) : 0;
+    m->rows = m->kind == 2 ? I(w, 0x7c) : 0;
+    if (m->kind == 2 && (m->row <= 0 || m->rows < 0 || m->rows > 0x7fffffff / m->row)) return 0;
+    if (m->kind == 1 && I(w, 0x7c) < 0) return 0;
     unsigned n = widget_count_children(w);
-    for (unsigned i = 0; i < n; ++i) collect(widget_get_child(w, i), &s, 1);
-    if (!s.n) return 0;
-    int top = I(w, 0x84), h = I(w, 0x0c), cur = -1, first = -1;
-    void *old = (void *)0;
-    for (int i = 0; i < s.n; ++i) {
-        int y = widget_y(at[i], w);
-        int shown = y < top + h && y + I(at[i], 0x0c) > top;
-        if (shown && first < 0) first = i;
-        if (focused(at[i])) { old = at[i]; if (shown) cur = i; }
-    }
-    if (!dir) { if (cur >= 0) { activate(at[cur]); return STOP; } return 0; }
-    int next = cur < 0 ? (first < 0 ? 0 : first) : cur + dir;
-    if (next < 0 || next >= s.n) return STOP;
-    int y = widget_y(at[next], w), eh = I(at[next], 0x0c);
-    int want = y < top ? y : y + eh > top + h ? y + eh - h : top;
-    set_focus(old, at[next]);
-    if (want != top) scroll_view_scroll_delta_to(w, 0, want - top, GLIDE_MS);
-    return STOP;
-}
-
-/* table_client re-binds a few table_row widgets (index @0x78) to the visible rows, so select by row
- * index. Rows rebind on every offset change, so scroll first and focus the freshly bound row after.
- * Returns 0 when there are no tap-target rows. */
-static int table_nav(void *w, int dir, int row, int rows, int h) {
-    int top = I(w, 0x80), cur = -1, any = 0;
-    void *old = (void *)0;
-    unsigned n = widget_count_children(w);
-    for (unsigned i = 0; i < n; ++i) {
-        void *r = widget_get_child(w, i), *e = first_entry(r);
-        if (!e) continue;
-        any = 1;
-        int k = I(r, 0x78);
-        if (focused(e)) {
-            old = e;
-            if (k >= 0 && k < rows && k * row < top + h && (k + 1) * row > top) cur = k;
+    if (m->kind == 1) {
+        entries_t s = { m->at, 0, MAX_ENTRIES, 2048 };
+        for (unsigned i = 0; i < n; ++i) collect(widget_get_child(w, i), &s, 1);
+        m->n = s.n; m->rows = s.n;
+        for (int i = 0; i < m->n; ++i) m->id[i] = i;
+    } else {
+        if (m->kind == 3) m->rows = (int)n;
+        for (unsigned i = 0; i < n && m->n < MAX_ENTRIES; ++i) {
+            void *r = widget_get_child(w, i), *e = first_entry(r);
+            int id = m->kind == 2 ? I(r, 0x78) : (int)i;
+            if (e && id >= 0 && id < m->rows) {
+                m->at[m->n] = e; m->id[m->n++] = id;
+            }
         }
     }
-    if (!any) return 0;
-    if (!dir) { if (cur >= 0) { activate(old); return STOP; } return 0; }
-    int next = cur < 0 ? top / row + (top % row != 0) : cur + dir;
-    if (cur < 0 && next >= rows) next = rows - 1;
-    if (next < 0 || next >= rows) return STOP;
-    int y = next * row;
-    int want = clamp_step(y < top ? y : y + row > top + h ? y + row - h : top, row * rows - h, 0);
-    if (want != top) {
-        table_client_stop_animator_scroll(w);
-        table_client_set_yoffset(w, want);
+    if (widget_get_prop_int(w, COUNT, -1) != m->rows) {
+        prop(w, SEL, -1); prop(w, COUNT, m->rows);
     }
-    for (unsigned i = 0; i < widget_count_children(w); ++i) {
-        void *r = widget_get_child(w, i), *e = first_entry(r);
-        if (e && I(r, 0x78) == next) { set_focus(old, e); break; }
+    return 1;
+}
+
+static rect_t bounds(menu_t *m, int i) {
+    void *e = m->at[i];
+    rect_t r = {0, 0, I(e, 8), I(e, 0x0c)};
+    for (void *p = e; p && p != m->w; p = P(p, 0x48)) {
+        r.x += I(p, 0); r.y += I(p, 4);
     }
-    return STOP;
+    if (m->kind != 3) r.y -= m->top;
+    if (m->kind == 1) r.x -= I(m->w, 0x80);
+    return r;
+}
+
+static int index_of(menu_t *m, int id) {
+    for (int i = 0; i < m->n; ++i) if (m->id[i] == id) return i;
+    return -1;
+}
+
+static int moving(menu_t *m) {
+    return m->kind == 1 ? P(m->w, 0xe8) != 0 :
+        m->kind == 2 ? P(m->w, 0xd0) != 0 : 0;
+}
+
+static void stop_scroll(menu_t *m) {
+    if (m->kind == 2) table_client_stop_animator_scroll(m->w);
+    else if (m->kind == 1 && P(m->w, 0xe8)) {
+        /* Same pause/destroy/null sequence as stock table_client_stop_animator_scroll. */
+        void *a = P(m->w, 0xe8);
+        widget_animator_pause(a); widget_animator_destroy(a); P(m->w, 0xe8) = (void *)0;
+    }
+}
+
+/* Keep selection during native momentum and wheel glides. Once settled, repair an offscreen
+ * selection using the first fully visible target (partially visible only for oversized rows). */
+static int reconcile(menu_t *m, int settle) {
+    int id = m->kind == 3 ? I(m->w, 0x78) : widget_get_prop_int(m->w, SEL, -1);
+    int cur = index_of(m, id), first = -1, partial = -1;
+    if (m->kind == 3) return cur;
+    for (int i = 0; i < m->n; ++i) {
+        rect_t r = bounds(m, i);
+        if (r.y < m->height && r.y + r.h > 0) {
+            if (partial < 0) partial = i;
+            if (r.y >= 0 && r.y + r.h <= m->height && first < 0) first = i;
+        }
+    }
+    if (cur >= 0) {
+        rect_t r = bounds(m, cur);
+        if ((r.y < m->height && r.y + r.h > 0) || !settle) return cur;
+    } else if (id >= 0 && id < m->rows && !settle) return -1;
+    cur = first >= 0 ? first : partial;
+    prop(m->w, SEL, cur >= 0 ? m->id[cur] : -1);
+    return cur;
+}
+
+static void invalidate(void *w) { widget_invalidate_force(w, (void *)0); }
+
+/* Stock paints children first and calls this with the surface's canvas origin restored.
+ * Explicit outline avoids theme-dependent focus and doesn't overwrite playing/pressed styles. */
+int ringnav_paint(void *w, void *canvas) {
+    int result = stock_paint(w, canvas);
+    if (!w || !canvas || !kind(w) || surface() != w) return result;
+    menu_t m;
+    if (!load(&m, w)) return result;
+    int i = reconcile(&m, !moving(&m) && !window_manager_get_pointer_pressed(window_manager()));
+    if (i < 0) return result;
+    rect_t r = bounds(&m, i), old, clip;
+    if (r.w < 5 || r.h < 5 || !P(canvas, 0x38)) return result;
+    canvas_get_clip_rect(canvas, &old);
+    int x = I(canvas, 0), y = I(canvas, 4);
+    clip.x = old.x > x ? old.x : x; clip.y = old.y > y ? old.y : y;
+    int right = old.x + old.w < x + I(w, 8) ? old.x + old.w : x + I(w, 8);
+    int bottom = old.y + old.h < y + m.height ? old.y + old.h : y + m.height;
+    clip.w = right - clip.x; clip.h = bottom - clip.y;
+    if (clip.w <= 0 || clip.h <= 0) return result;
+    unsigned color = (unsigned)I(P(canvas, 0x38), 0xc0);
+    canvas_set_clip_rect(canvas, &clip);
+    canvas_set_stroke_color(canvas, 0xffffffffu);
+    canvas_stroke_rect(canvas, r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+    canvas_stroke_rect(canvas, r.x + 2, r.y + 2, r.w - 4, r.h - 4);
+    canvas_set_stroke_color(canvas, color);
+    canvas_set_clip_rect(canvas, &old);
+    return result;
+}
+
+int ringnav_touch(void *ctx, void *event) {
+    int result = stock_touch(ctx, event);
+    void *w = surface();
+    menu_t m;
+    if (!result && w && load(&m, w)) {
+        stop_scroll(&m); prop(w, TOUCH, 1);
+        invalidate(w);
+    }
+    return result; /* The very same touch continues through the stock tap/drag handlers. */
+}
+
+/* Observe actual clicks BEFORE app callbacks can navigate or destroy/rebind their widgets.
+ * Do not turn pointer-down into selection: a swipe is not a tap. */
+int ringnav_dispatch(void *target, void *event) {
+    if (target && event && I(event, 0) == EVT_CLICK) {
+        void *w = surface();
+        menu_t m;
+        if (w && load(&m, w)) {
+            for (int i = 0; i < m.n; ++i) {
+                if (m.at[i] == target) {
+                    prop(w, SEL, m.id[i]); invalidate(w); break;
+                }
+            }
+        }
+    }
+    return stock_dispatch(target, event);
 }
 
 int ringnav(void *ctx, void *event) {
     int result = stock_keyup(ctx, event);
     if (result || !event) return result;
     unsigned key = (unsigned)I(event, 0x18);
-    if (key != KEY_PLAY && key != KEY_PREV && key != KEY_NEXT) return result;
-    if (!g_backlight_status || g_lockscreen_pageflag || g_testmode_flag ||
-        g_guideflag || g_poweroff_state || g_usblink_status == 2 || bt__recv_pageflag)
-        return result;
-    void *wm = window_manager();
-    void *top = window_manager_get_top_window(wm);
+    if (key != KEY_CENTER && key != KEY_PREV && key != KEY_NEXT) return result;
+    if (!usable()) return result;
+    /* Match the stock power-key release exclusions, including release after long press. */
+    if (key == KEY_CENTER && (g_power_longkey || g_ingore_bootkey_flag ||
+        *(volatile unsigned char *)0xa37c8a)) return result;
+    void *wm = window_manager(), *top = window_manager_get_top_window(wm);
     if (!top || !allowed(widget_get_prop_str(top, "name", (void *)0))) return result;
-    /* Consume navigation input during transitions/touch gestures, without changing volume. */
     if (window_manager_is_animating(wm) || window_manager_get_pointer_pressed(wm)) return STOP;
-    void *w = (void *)0;
-    int count = 0, budget = 512;
-    find_surface(top, &w, &count, 0, &budget);
+    void *w = surface();
     int dir = key == KEY_NEXT ? 1 : key == KEY_PREV ? -1 : 0;
-    /* Nothing to select: the center key stays play/pause; the ring never falls through to volume. */
-    int fallback = dir ? STOP : result;
-    if (count != 1) return fallback;
-    const char *type = widget_get_type(w);
-    if (eq(type, "slide_menu")) {
-        if (dir > 0) slide_menu_scroll_to_next(w);
-        else if (dir < 0) slide_menu_scroll_to_prev(w);
-        else {
-            int value = I(w, 0x78);
-            void *e = value >= 0 ? first_entry(widget_get_child(w, value)) : (void *)0;
-            if (!e) return result;
-            activate(e);
-        }
-    } else if (eq(type, "table_client")) {
-        /* Verified V1.32 fields: row height, rows, yoffset, widget height. */
-        int row = I(w, 0x78), rows = I(w, 0x7c), h = I(w, 0x0c);
-        if (row <= 0 || rows < 0 || h <= 0 || rows > 0x7fffffff / row) return fallback;
-        if (table_nav(w, dir, row, rows, h)) return STOP;
-        if (!dir) return result;
-        table_client_stop_animator_scroll(w);
-        table_client_set_yoffset(w, clamp_step(I(w, 0x80), row * rows - h, dir * RING_STEP));
-    } else {
-        /* Leave horizontal and page-snapping controls to stock touch input. */
-        if (!*((unsigned char *)w + 0x91) || *((unsigned char *)w + 0x92)) return fallback;
-        int vh = I(w, 0x7c), h = I(w, 0x0c);
-        if (vh < 0 || h <= 0) return fallback;
-        if (list_nav(w, dir)) return STOP;
-        if (!dir) return result;
-        int next = clamp_step(I(w, 0x84), vh - h, dir * RING_STEP);
-        if (next != I(w, 0x84)) scroll_view_scroll_delta_to(w, 0, next - I(w, 0x84), GLIDE_MS);
+    if (!w) return dir ? STOP : result;
+    menu_t m;
+    if (!load(&m, w)) return dir ? STOP : result;
+    int touch = widget_get_prop_int(w, TOUCH, 0);
+    if (touch) stop_scroll(&m);
+    int cur = reconcile(&m, touch || !moving(&m));
+    if (!dir) {
+        if (cur < 0) return STOP;
+        char click[0x30];
+        /* Synchronous native click: no queued recycled row can change the activated item. */
+        ringnav_dispatch(m.at[cur], pointer_event_init(click, EVT_CLICK, m.at[cur], 0, 0));
+        return STOP; /* No widget access after the app callback. */
     }
+    prop(w, TOUCH, 0);
+    if (m.kind == 3) {
+        if (dir > 0) slide_menu_scroll_to_next(w); else slide_menu_scroll_to_prev(w);
+    } else if (m.n) {
+        int id = widget_get_prop_int(w, SEL, -1);
+        int next = id < 0 ? (cur >= 0 ? m.id[cur] : 0) : id + dir;
+        if (next < 0 || next >= m.rows) return STOP;
+        int y, h;
+        if (m.kind == 2) { y = next * m.row; h = m.row; }
+        else { rect_t r = bounds(&m, next); y = r.y + m.top; h = r.h; }
+        int want = y < m.top ? y : y + h > m.top + m.height ? y + h - m.height : m.top;
+        want = clamp_step(want, (m.kind == 2 ? m.rows * m.row : I(w, 0x7c)) - m.height, 0);
+        prop(w, SEL, next);
+        /* Reversing into the current viewport must cancel the previous glide away from it. */
+        if (want == m.top && moving(&m)) stop_scroll(&m);
+        if (want != m.top) {
+            if (m.kind == 2) { stop_scroll(&m); table_client_set_yoffset(w, want); }
+            else scroll_view_scroll_delta_to(w, 0, want - m.top, GLIDE_MS);
+        }
+    } else {
+        int max = (m.kind == 2 ? m.rows * m.row : I(w, 0x7c)) - m.height;
+        int next = clamp_step(m.top, max, dir * RING_STEP);
+        if (m.kind == 2) { stop_scroll(&m); table_client_set_yoffset(w, next); }
+        else if (next != m.top) scroll_view_scroll_delta_to(w, 0, next - m.top, GLIDE_MS);
+    }
+    invalidate(w);
     return STOP;
 }
