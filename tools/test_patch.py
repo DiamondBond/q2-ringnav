@@ -103,9 +103,11 @@ class Machine:
             if self.on_click: self.on_click(a,b)
             ret=0
         elif name=='table_client_stop_animator_scroll': self.word(a+0xd0,0); ret=0
-        elif name=='table_client_set_yoffset':
-            self.word(a+0x80,b)
-            if self.rebind: self.rebind(a,b)
+        elif name=='table_client_scroll_to':
+            if self.glide:
+                self.word(a+0x80,b)
+                if self.rebind: self.rebind(a,b)
+            else: self.word(a+0xd0,0x1234)
             ret=0
         elif name=='canvas_get_clip_rect':
             for j,v in enumerate(self.clip): self.word(b+4*j,v)
@@ -149,7 +151,7 @@ class Machine:
         child=self.node(t)
         self.top=self.node('window',name,[child])
         return child
-    def moved(self): return [x for x in self.calls if x[0] in ('scroll_view_scroll_delta_to','table_client_set_yoffset','slide_menu_scroll_to_next','slide_menu_scroll_to_prev')]
+    def moved(self): return [x for x in self.calls if x[0] in ('scroll_view_scroll_delta_to','table_client_scroll_to','slide_menu_scroll_to_next','slide_menu_scroll_to_prev')]
     def dispatched(self): return [x for x in self.calls if x[0]=='stock_dispatch']
 
 checks=0
@@ -245,6 +247,7 @@ m.rebind=rebind; rebind(w,0)
 m.paint(w); assert m.selected(w)==0
 assert m.call()==11 and m.selected(w)==1
 assert m.call()==11 and m.selected(w)==2 and m.get(w+0x80)==48
+assert m.moved()[-1][0]=='table_client_scroll_to'
 assert m.call(218)==11 and m.dispatched()[0][1]==entries[1]; passed()
 # A touch click in a rebound row immediately changes what centre opens.
 m.touch(); m.click(entries[0]); assert m.selected(w)==1
@@ -286,6 +289,51 @@ assert m.call(218,gap=50)==11 and len(m.dispatched())==1; passed()
 m=Machine(); w=m.page()
 assert m.call(218)==11 and not m.dispatched()
 assert m.call(218,gap=100)==11 and not m.dispatched(); passed()
+# A touch between the releases cancels the pair: the second press selects again.
+m=Machine(); w=m.page(); m.word(w+0x0c,96)
+es=[m.entry(w,i*48) for i in range(3)]; m.nodes[w]['children']=es
+assert m.call(218)==11 and len(m.dispatched())==1
+m.call(address=HOOKS['on_wm_tsdown_before_fun'][0], gap=100)
+assert m.call(218,gap=100)==11 and m.dispatched()[0][1]==es[0]; passed()
+# A different top window cancels the pair too: no screen toggle after navigation.
+m=Machine(); w=m.page('sysset_page'); m.word(w+0x0c,96)
+es=[m.entry(w,i*48) for i in range(3)]; m.nodes[w]['children']=es
+assert m.call(218)==11 and len(m.dispatched())==1
+w2=m.page('display_page'); m.word(w2+0x0c,96)
+es2=[m.entry(w2,i*48) for i in range(3)]; m.nodes[w2]['children']=es2
+assert m.call(218,gap=100)==11 and m.dispatched()[0][1]==es2[0]; passed()
+# Fast same-direction detents accelerate; a slow detent or a reversal starts over.
+m=Machine(); w=m.page(); m.word(w+0x0c,96); m.word(w+0x7c,40*48)
+es=[m.entry(w,i*48) for i in range(40)]; m.nodes[w]['children']=es
+m.paint(w)
+assert m.call(173)==11 and m.selected(w)==1
+assert m.call(173,gap=50)==11 and m.selected(w)==2
+assert m.call(173,gap=50)==11 and m.selected(w)==4
+assert m.call(173,gap=50)==11 and m.selected(w)==6
+assert m.call(173,gap=50)==11 and m.selected(w)==8
+assert m.call(173,gap=50)==11 and m.selected(w)==12
+assert m.call(173,gap=50)==11 and m.selected(w)==16
+assert m.call(173,gap=50)==11 and m.selected(w)==20
+assert m.call(173,gap=50)==11 and m.selected(w)==28
+assert m.call(173,gap=50)==11 and m.selected(w)==36
+assert m.call(173,gap=50)==11 and m.selected(w)==39
+assert m.call(173,gap=50)==11 and m.selected(w)==39
+assert m.call(172,gap=50)==11 and m.selected(w)==38
+assert m.call(173,gap=1000)==11 and m.selected(w)==39; passed()
+# Fast detents accelerate the pixel-scroll fallback the same way.
+m=Machine(); w=m.page(t='table_client')
+assert m.call(gap=50)==11 and m.get(w+0x80)==48
+assert m.call(gap=50)==11 and m.get(w+0x80)==96
+assert m.call(gap=50)==11 and m.get(w+0x80)==192
+assert m.call(gap=1000)==11 and m.get(w+0x80)==240; passed()
+# A click on a clickable child selects its collected ancestor, not a stale row.
+m=Machine(); w=m.page(); m.word(w+0x0c,96)
+row1=m.entry(w,0); row2=m.entry(w,96); deep=m.entry(row1,0)
+m.nodes[row1]['children']=[deep]; m.nodes[w]['children']=[row1,row2]
+m.paint(w); assert m.selected(w)==0
+assert m.call(173)==11 and m.selected(w)==1
+m.click(deep); assert m.selected(w)==0
+m.click(m.node('button')); assert m.selected(w)==0; passed()
 # Real canvas ABI, translation and clip code execute; only the LCD rectangle sink is mocked.
 m=Machine(); w=m.page(); m.word(w+0x0c,96)
 e=m.entry(w,48); m.nodes[w]['children']=[e]

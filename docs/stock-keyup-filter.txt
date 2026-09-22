@@ -1,3 +1,7 @@
+# Reference dump of on_wm_keyup_before_fun (0x4e85c8), stock V1.32. The payload chains to
+# this before doing anything, so the stock key lock, power long-press and boot-key
+# exclusions keep working; the parity tests execute this code and compare it with stock.
+# Key 0xda is the centre release, 0xac/0xad the wheel detents, 0xab Play/Pause.
 
 work/root/release/bin/demo:	file format elf32-mips
 

@@ -4,6 +4,7 @@ import argparse, hashlib, io, json, pathlib, re, struct, subprocess, tarfile, zi
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ZIP_SHA = '154c17822d09be001be35c03d2d3488424dee195221790bd70864480d55b0f00'
 DEMO_SHA = '2c5f06142850b4fc168f82b44a81550cce0a5b4b9fe1c179dced4a08a3049138'
+VERSION = 'V1.8R'
 BASE = 0xb00000
 SCRATCH = 0xb0f000
 RING_STEP = 48
@@ -65,7 +66,7 @@ FUNCTIONS = {
  'slide_menu_scroll_to_next': ('int', 'void *'),
  'slide_menu_scroll_to_prev': ('int', 'void *'),
  'table_client_stop_animator_scroll': ('int', 'void *'),
- 'table_client_set_yoffset': ('int', 'void *, int'),
+ 'table_client_scroll_to': ('int', 'void *, int'),
  'scroll_view_scroll_delta_to': ('int', 'void *, int, int, int'),
 }
 GLOBALS = ['g_backlight_status', 'g_lockscreen_pageflag', 'g_testmode_flag',
@@ -92,6 +93,11 @@ def build(zip_path, out):
     sq = out/'stock.squashfs'; sq.write_bytes(blobs['recovery-update/rootfs.squashfs'])
     raw_demo = subprocess.check_output(['unsquashfs','-cat',str(sq),'release/bin/demo'])
     check(sha(raw_demo) == DEMO_SHA, 'Unsupported demo binary')
+    # Every allowlisted context must exist in this exact stock binary.
+    contexts = re.findall(r'"([^"]+)"', (ROOT/'patch/contexts.inc').read_text())
+    check(contexts, 'No navigation contexts audited')
+    for name in contexts:
+        check(name.encode()+b'\0' in raw_demo, f'Context {name} is absent from the stock binary')
     demo = out/'stock-demo'; demo.write_bytes(raw_demo)
     syms = symbols(demo)
     header = [f'#define RING_STEP {RING_STEP}']
@@ -115,7 +121,8 @@ def build(zip_path, out):
     payload = (out/'patch.bin').read_bytes()
     ps = symbols(out/'patch.elf')
     check(len(payload) < SCRATCH-BASE, 'Payload overlaps its scratch page')
-    check(ps['last_center'] == SCRATCH, 'Scratch cell moved')
+    check(ps['__scratch_start'] == SCRATCH, 'Scratch state moved')
+    check(ps['__scratch_end'] <= SCRATCH + 0x10000, 'Scratch state exceeds its page')
     patched = bytearray(raw_demo)
     hookoff = fileoff(patched, HOOK)
     hooks = {}
@@ -132,14 +139,15 @@ def build(zip_path, out):
         hooks[name] = dict(address=hex(address), replacement=replacement, original=raw_demo[off:off+12].hex())
     # Single shared version literal: About display and updater equality check.
     check(patched.count(b'V1.32\0') == 1, 'Version literal is not unique')
-    patched = patched.replace(b'V1.32\0', b'V1.7R\0')
+    patched = patched.replace(b'V1.32\0', VERSION.encode()+b'\0')
     nulls = [(o,p) for o,p in segments(patched) if p[0] == 0]
     check(len(nulls) == 1 and nulls[0][0] == segments(patched)[-1][0], 'No final PT_NULL slot')
     check(all(p[2]+p[5] < BASE for _,p in segments(patched) if p[0] == 1), 'Patch mapping overlaps')
     appendoff = (len(patched)+65535)&~65535
     patched.extend(bytes(appendoff-len(patched)))
     patched.extend(payload)
-    struct.pack_into('<8I',patched,nulls[0][0],1,appendoff,BASE,BASE,len(payload),SCRATCH-BASE+4,7,65536)
+    struct.pack_into('<8I',patched,nulls[0][0],1,appendoff,BASE,BASE,len(payload),
+                     ps['__scratch_end']-BASE,7,65536)
     (out/'demo').write_bytes(patched)
     (out/'patch.dis').write_text(run('llvm-objdump','-d',out/'patch.elf'))
     # Pseudo-file round trip preserves every original inode's metadata and hardlinks.
@@ -171,7 +179,7 @@ def build(zip_path, out):
     blobs['recovery-update/rootfs.squashfs'] = newsq.read_bytes()
     # Stock image proves this size fits; do not enlarge beyond its padded size.
     check(len(blobs['recovery-update/rootfs.squashfs']) <= sq.stat().st_size, 'Repacked rootfs exceeds stock size')
-    blobs['firmware_v20.info'] = ('Shanling Q2\nV1.7R\n'+''.join(
+    blobs['firmware_v20.info'] = (f'Shanling Q2\n{VERSION}\n'+''.join(
         hashlib.md5(blobs[n]).hexdigest()+'  '+n+'\n' for n in [
             'recovery-update/xImage','recovery-update/rootfs.squashfs'])).encode()
     with tarfile.open(out/'update.tar','w',format=tarfile.GNU_FORMAT) as t:
@@ -184,7 +192,7 @@ def build(zip_path, out):
         rootfs_sha256=sha(newsq.read_bytes()), kernel_sha256=sha(blobs['recovery-update/xImage']),
         hook_address=hex(HOOK), hook_file_offset=hex(hookoff), patch_address=hex(BASE),
         patch_file_offset=hex(appendoff), patch_bytes=len(payload), ring_step_pixels=RING_STEP,
-        version='V1.7R', hooks=hooks,
+        version=VERSION, hooks=hooks,
         patch_symbols={n:hex(v) for n,v in ps.items() if n.startswith('stock_')},
         tools={t:run(t,'--version').splitlines()[0] for t in ['clang','ld.lld','llvm-objcopy']})
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')

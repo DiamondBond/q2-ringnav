@@ -4,7 +4,7 @@ Firmware mod for the Shanling Q2 that lets you use the scroll wheel to move thro
 
 The touchscreen still works normally. Outside supported menus, the wheel still controls volume and the other buttons keep their normal behaviour.
 
-**Latest firmware: V1.7R**
+**Latest firmware: V1.8R**
 
 [**Download the latest release**](https://github.com/DiamondBond/q2-ringnav/releases/latest)
 
@@ -14,7 +14,7 @@ The touchscreen still works normally. Outside supported menus, the wheel still c
 2. Unzip it and copy `update.tar` to the root of your microSD card.
 3. On the Q2, go to **System settings → System Update → TF card update**.
 4. Confirm the update and wait for the player to restart.
-5. Check **About** and make sure it shows `V1.7R`.
+5. Check **About** and make sure it shows `V1.8R`.
 
 Make sure the Q2 is charged before updating, and don't remove the microSD card while the update is running.
 
@@ -26,7 +26,7 @@ To go back to stock, just flash the official Shanling Q2 V1.32 firmware again.
 
 ## Controls
 
-- Turn the scroll wheel to move through menu items.
+- Turn the scroll wheel to move through menu items; a fast spin skips further.
 - Short press the centre button to open the highlighted item.
 - Double-press the centre button to turn the screen off.
 - Tap and swipe still work normally.
@@ -40,6 +40,7 @@ If you find a menu where something behaves strangely, please open an issue and s
 
 ## Changelog
 
+- **V1.8R**: Wheel acceleration, gliding music tables, a scoped double-press screen toggle, nested tap-target selection and a build-time context audit (awaiting hardware validation).
 - **V1.7R**: Added centre button double-press to toggle the screen on/off (awaiting hardware validation).
 - **V1.6R**: Home screen now keeps the stock selected-card highlight without any extra outline.
 - **V1.5R**: Added menu item highlighting, centre-button selection, and music selection features. Tested on real Q2 hardware.
@@ -61,7 +62,11 @@ Four checked MIPS prologues redirect into a payload at `0xb00000`, using the fin
 
 Selection is stored in widget-owned integer properties on the navigation surface, independently of AWTK's focused flag. The outline and centre action resolve that same logical selection against the current entries. Centre dispatches a synchronous native `EVT_CLICK`, so a queued click cannot hit a row rebound between selection and delivery. It never dereferences the target after delivery.
 
-A centre release within 400 ms of the previous one is handed back to the stock key-up chain, whose short press toggles the screen through `screen_action`; the first press of the pair still opens the highlighted item. The payload maps its 64K window read/write and keeps the last release time in a zero-filled scratch cell at `0xb0f000`. A wheel detent clears the window.
+Wheel detents accelerate: consecutive detents less than 140 ms apart in the same direction double the step every third detent, up to eight entries. A pause, a reversal, a touch or a centre press starts the count over. Music tables glide with the stock `table_client_scroll_to` animator instead of jumping, so both list kinds settle the same way.
+
+A centre release within 400 ms of the previous one is handed back to the stock key-up chain, whose short press toggles the screen through `screen_action`; the first press of the pair still opens the highlighted item. The pair only counts when both releases land on the same top window and navigation surface, and any touch or wheel detent clears it. The payload maps writable state at `0xb0f000` for the last release, the window/surface identity and the detent timing.
+
+A native click may land on a clickable child of a collected target; selection then walks up to the nearest collected ancestor, so the outline and centre stay on the row that actually owns the tap.
 
 The canvas hook intersects the existing clip with the viewport and restores both clip and stroke color; this firmware's `canvas_save/restore` do not save those properties.
 
@@ -84,7 +89,9 @@ python3 tools/test_patch.py /tmp/q2-build  # requires unicorn==2.1.4
 
 The suite executes the actual patched MIPS payload and stock key/touch filters. UI services are mocked; a separate scenario executes the stock canvas clip/color/rectangle code down to a mocked LCD sink.
 
-Checks cover touch reselection, gesture suppression, momentum handoff, interrupted and reversed wheel glides, recycled rows, menu return, count changes, empty/oversized rows, preserved Play/Pause, power-release exclusions, the double-press window and stock key-lock parity. Every call checks preserved registers/stack, and native calls check the PIC `$t9` convention.
+Checks cover touch reselection, gesture suppression, momentum handoff, interrupted and reversed wheel glides, acceleration steps and resets, recycled rows, menu return, count changes, empty/oversized rows, preserved Play/Pause, power-release exclusions, the double-press window and its touch/page-change exclusions, nested tap targets and stock key-lock parity. Every call checks preserved registers/stack, and native calls check the PIC `$t9` convention.
+
+The builder also rejects any `patch/contexts.inc` name that is absent from the audited stock binary, so an allowlist typo cannot silently disable a screen.
 
 Two fresh builds must produce identical `update.tar` files. Packaging verifies MD5 entries, unchanged kernel and rootfs metadata, and a rootfs no larger than stock.
 
@@ -96,8 +103,11 @@ Before distributing a build as hardware-verified, check a Q2 on Home, Local Song
 - wheel → swipe → settle → centre
 - swipe → wheel during momentum
 - rapid wheel reversals
+- fast wheel spin (multiple rows per detent) then slow spin (one row)
 - return from a submenu
 - double-press centre → screen off, then centre → wake
+- centre → tap → centre within 400 ms: selects twice, screen stays on
+- centre → submenu → centre within 400 ms: selects, screen stays on
 - single centre press → select, with no screen change
 - screen-off wake
 - Play/Pause
