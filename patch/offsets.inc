@@ -29,7 +29,12 @@
 #define CANVAS_X 0x00
 #define CANVAS_Y 0x04
 #define CANVAS_LCD 0x38
+#define LCD_FILL_COLOR 0xbc
 #define LCD_STROKE_COLOR 0xc0
+/* Selection outline tuning. RADIUS > 2 or the stock rounded path squares off; tests read these. */
+#define RADIUS 9
+#define FILL_RGB 0x2b2b2b
+#define FILL_ALPHA 0x40
 #define KEY_CENTER 218
 #define KEY_PREV 172
 #define KEY_NEXT 173

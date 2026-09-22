@@ -4,7 +4,7 @@ import argparse, hashlib, io, json, pathlib, re, struct, subprocess, tarfile, zi
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ZIP_SHA = '154c17822d09be001be35c03d2d3488424dee195221790bd70864480d55b0f00'
 DEMO_SHA = '2c5f06142850b4fc168f82b44a81550cce0a5b4b9fe1c179dced4a08a3049138'
-VERSION = 'V1.8R'
+VERSION = 'V1.9R'
 BASE = 0xb00000
 SCRATCH = 0xb0f000
 RING_STEP = 48
@@ -68,8 +68,11 @@ FUNCTIONS = {
  'widget_animator_destroy': ('int', 'void *'),
  'canvas_get_clip_rect': ('int', 'void *, void *'),
  'canvas_set_clip_rect': ('int', 'void *, const void *'),
+ 'canvas_set_fill_color': ('int', 'void *, unsigned'),
  'canvas_set_stroke_color': ('int', 'void *, unsigned'),
  'canvas_stroke_rect': ('int', 'void *, int, int, int, int'),
+ 'canvas_fill_rounded_rect': ('int', 'void *, const void *, const void *, const void *, unsigned'),
+ 'canvas_stroke_rounded_rect': ('int', 'void *, const void *, const void *, const void *, unsigned, unsigned'),
  'pointer_event_init': ('void *', 'void *, int, void *, int, int'),
  'time_now_ms': ('unsigned', 'void'),
  'tk_strcmp': ('int', 'const char *, const char *'),
@@ -82,6 +85,20 @@ FUNCTIONS = {
 GLOBALS = ['g_backlight_status', 'g_lockscreen_pageflag', 'g_testmode_flag',
            'g_guideflag', 'g_poweroff_state', 'g_usblink_status', 'bt__recv_pageflag',
            'g_power_longkey', 'g_ingore_bootkey_flag']
+
+FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
+         '-mno-abicalls','-fno-pic','-G0','-ffreestanding','-fno-builtin',
+         '-fno-stack-protector','-fno-unwind-tables','-fno-asynchronous-unwind-tables',
+         '-Os','-Wall','-Wextra','-Werror']
+
+def compile_payload(out):
+    """Compile and link the payload."""
+    run('clang',*FLAGS,'-I',out,'-c',ROOT/'patch/ringnav.c','-o',out/'ringnav.o')
+    run('clang',*FLAGS,'-c',ROOT/'patch/trampoline.S','-o',out/'trampoline.o')
+    run('ld.lld','-m','elf32ltsmip','-T',ROOT/'patch/link.ld','-e','ringnav',
+        out/'ringnav.o',out/'trampoline.o','-o',out/'patch.elf')
+    run('llvm-objcopy','-O','binary',out/'patch.elf',out/'patch.bin')
+    return symbols(out/'patch.elf')
 
 def build(zip_path, out):
     out.mkdir(parents=True, exist_ok=True)
@@ -133,17 +150,8 @@ def build(zip_path, out):
     for name in GLOBALS:
         header.append(f'#define {name} (*(volatile unsigned char *)0x{syms[name]:x}u)')
     (out/'stock.h').write_text('\n'.join(header)+'\n')
-    flags = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
-             '-mno-abicalls','-fno-pic','-G0','-ffreestanding','-fno-builtin',
-             '-fno-stack-protector','-fno-unwind-tables','-fno-asynchronous-unwind-tables',
-             '-Os','-Wall','-Wextra','-Werror']
-    run('clang',*flags,'-I',out,'-c',ROOT/'patch/ringnav.c','-o',out/'ringnav.o')
-    run('clang',*flags,'-c',ROOT/'patch/trampoline.S','-o',out/'trampoline.o')
-    run('ld.lld','-m','elf32ltsmip','-T',ROOT/'patch/link.ld','-e','ringnav',
-        out/'ringnav.o',out/'trampoline.o','-o',out/'patch.elf')
-    run('llvm-objcopy','-O','binary',out/'patch.elf',out/'patch.bin')
+    ps = compile_payload(out)
     payload = (out/'patch.bin').read_bytes()
-    ps = symbols(out/'patch.elf')
     check(len(payload) < SCRATCH-BASE, 'Payload overlaps its scratch page')
     check(ps['__scratch_start'] == SCRATCH, 'Scratch state moved')
     check(ps['__scratch_end'] <= SCRATCH + 0x10000, 'Scratch state exceeds its page')

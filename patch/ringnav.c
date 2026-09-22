@@ -9,6 +9,10 @@
 #define ACCEL_MAX 8
 #define MAX_ENTRIES 512
 #define POS_MEM 128
+/* RADIUS, FILL_RGB and FILL_ALPHA come from offsets.inc; FILL_COLOR packs the bytes at compile
+ * time (little-endian r,g,b,a) and the outline is opaque neutral white, never the playing red. */
+#define FILL_COLOR ((FILL_ALPHA << 24) | FILL_RGB)
+#define OUTLINE_COLOR 0xffffffffu
 #define I(p, o) (*(int *)((char *)(p) + (o)))
 #define P(p, o) (*(void **)((char *)(p) + (o)))
 #define B(p, o) (*(unsigned char *)((char *)(p) + (o)))
@@ -415,7 +419,10 @@ static int reconcile(menu_t *m, int settle) {
 }
 
 /* Stock paints children first and calls this with the surface's canvas origin restored.
- * Explicit outline avoids theme-dependent focus and doesn't overwrite playing/pressed styles. */
+ * The selected row gets a neutral white outline with the stock dark surface as a translucent
+ * per-color fill (never the shared canvas global alpha), so the selection stays legible over
+ * album art without borrowing the red "playing" language or the native focus flag. Small rows
+ * and degenerate geometry keep the square double-stroke fallback. */
 int ringnav_paint(void *w, void *canvas) {
     int result = stock_paint(w, canvas);
     if (!w || !canvas || !kind(w) || surface() != w) return result;
@@ -434,12 +441,34 @@ int ringnav_paint(void *w, void *canvas) {
     clip.w = right - clip.x;
     clip.h = bottom - clip.y;
     if (clip.w <= 0 || clip.h <= 0) return result;
-    unsigned color = (unsigned)I(P(canvas, CANVAS_LCD), LCD_STROKE_COLOR);
+    void *lcd = P(canvas, CANVAS_LCD);
+    unsigned fill_color = (unsigned)I(lcd, LCD_FILL_COLOR);
+    unsigned stroke_color = (unsigned)I(lcd, LCD_STROKE_COLOR);
     canvas_set_clip_rect(canvas, &clip);
-    canvas_set_stroke_color(canvas, 0xffffffffu);
-    canvas_stroke_rect(canvas, r.x + 1, r.y + 1, r.w - 2, r.h - 2);
-    canvas_stroke_rect(canvas, r.x + 2, r.y + 2, r.w - 4, r.h - 4);
-    canvas_set_stroke_color(canvas, color);
+    rect_t outer = { r.x + 1, r.y + 1, r.w - 2, r.h - 2 };
+    rect_t inner = { outer.x + 1, outer.y + 1, outer.w - 2, outer.h - 2 };
+    int drawn = 0;
+    /* Two one-pixel rounded strokes, not one border_width=2 call: the effect then does not
+     * depend on how a canvas backend interprets the width argument. Geometry is checked before
+     * the call, and radius 9/8 both stay above the stock "square at <= 2" cutoff. The stock
+     * rounded stroke returns non-zero when its backend cannot draw (for example a canvas without
+     * a vgcanvas), and the safe square fallback then keeps the outline visible. */
+    if (outer.w > 2 * RADIUS && outer.h > 2 * RADIUS) {
+        unsigned fill = FILL_COLOR;
+        canvas_fill_rounded_rect(canvas, &outer, (void *)0, &fill, RADIUS);
+        unsigned white = OUTLINE_COLOR;
+        drawn = canvas_stroke_rounded_rect(canvas, &outer, (void *)0, &white, RADIUS, 1) == 0;
+        if (drawn) canvas_stroke_rounded_rect(canvas, &inner, (void *)0, &white, RADIUS - 1, 1);
+    }
+    if (!drawn) {
+        canvas_set_stroke_color(canvas, OUTLINE_COLOR);
+        canvas_stroke_rect(canvas, outer.x, outer.y, outer.w, outer.h);
+        canvas_stroke_rect(canvas, inner.x, inner.y, inner.w, inner.h);
+    }
+    /* Save/restore explicitly: this firmware's canvas_save/restore cover neither clip nor
+     * either color, and the global alpha is deliberately never touched. */
+    canvas_set_fill_color(canvas, fill_color);
+    canvas_set_stroke_color(canvas, stroke_color);
     canvas_set_clip_rect(canvas, &old);
     return result;
 }
