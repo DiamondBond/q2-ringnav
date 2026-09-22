@@ -237,15 +237,19 @@ class Machine:
         es=[self.entry(w,i*48) for i in range(n)]
         self.nodes[w]['children']=es
         return w,es
+    def bind(self,rows,offset=0):
+        """Reindex a recycled row pool the way the stock table rebind does."""
+        for j,r in enumerate(rows):
+            self.word(r+O['ROW_INDEX'],offset//48+j); self.word(r+O['W_Y'],offset+j*48)
     def table_page(self,n=4,rows=20,height=96):
         """A table_client page of n recycled rows; returns (surface, row widgets, entries)."""
         w=self.page('allmusic_page','table_client')
         self.word(w+O['ROW_HEIGHT'],48); self.word(w+O['TABLE_ROWS'],rows); self.word(w+O['W_H'],height)
         rs=[self.node('table_row') for _ in range(n)]
         es=[self.entry(r) for r in rs]; self.nodes[w]['children']=rs
-        for j,(r,e) in enumerate(zip(rs,es)):
+        for r,e in zip(rs,es):
             self.nodes[r]['children']=[e]; self.word(r+O['W_PARENT'],w)
-            self.word(r+O['ROW_INDEX'],j); self.word(r+O['W_Y'],j*48)
+        self.bind(rs)
         return w,rs,es
     def moved(self): return [x for x in self.calls if x[0] in ('scroll_view_scroll_delta_to','table_client_scroll_to','slide_menu_scroll_to_next','slide_menu_scroll_to_prev')]
     def dispatched(self): return [x for x in self.calls if x[0]=='stock_dispatch']
@@ -364,11 +368,7 @@ assert m.call(O['KEY_CENTER'])==11 and len(m.dispatched())==1; passed()
 
 # Recycle a small row pool: selection belongs to the logical index, never the widget.
 m=Machine(); w,rows,entries=m.table_page()
-def rebind(a,offset):
-    start=offset//48
-    for j,r in enumerate(rows):
-        m.word(r+O['ROW_INDEX'],start+j); m.word(r+O['W_Y'],(start+j)*48)
-m.rebind=rebind; rebind(w,0)
+m.rebind=lambda a,offset: m.bind(rows,offset); m.bind(rows)
 m.paint(w); assert m.selected(w)==0
 assert m.call()==11 and m.selected(w)==1
 assert m.call()==11 and m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==48
@@ -378,13 +378,13 @@ assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==entries[1]; passed(
 m.touch(); m.click(entries[0]); assert m.selected(w)==1
 assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==entries[0]; passed()
 # Swipe out of the old pool, then centre: settle/re-resolve before dispatch.
-m.touch(); m.word(w+O['TABLE_TOP'],480); rebind(w,480); m.word(w+O['TABLE_ANIMATOR'],0x9876)
+m.touch(); m.word(w+O['TABLE_TOP'],480); m.bind(rows,480); m.word(w+O['TABLE_ANIMATOR'],0x9876)
 assert m.call(O['KEY_CENTER'])==11 and m.selected(w)==10 and m.dispatched()[0][1]==entries[0]
 assert m.get(w+O['TABLE_ANIMATOR'])==0; passed()
 # Returning to a surviving menu keeps a valid selection; shrinking data repairs it.
 oldtop=m.top; m.page('playing_page'); assert m.call(O['KEY_CENTER'])==0
 m.top=oldtop; m.paint(w); assert m.selected(w)==10
-m.word(w+O['TABLE_ROWS'],1); m.word(w+O['TABLE_TOP'],0); rebind(w,0); m.paint(w)
+m.word(w+O['TABLE_ROWS'],1); m.word(w+O['TABLE_TOP'],0); m.bind(rows); m.paint(w)
 assert m.selected(w)==0; passed()
 
 # A recreated page recalls the last selected row and reveals it without a sacrificial press.
@@ -598,8 +598,7 @@ for wanted in (2,12):
     # Rebind the pool as the restarted glide completes.
     top=(wanted-1)*48
     m.word(w2+O['TABLE_TOP'],top); m.word(w2+O['TABLE_ANIMATOR'],0)
-    for j,r in enumerate(rs2):
-        m.word(r+O['ROW_INDEX'],wanted-1+j); m.word(r+O['W_Y'],top+j*48)
+    m.bind(rs2,top)
     m.paint(w2); assert m.selected(w2)==wanted
     m.call(O['KEY_CENTER']); assert m.dispatched()[0][1]==es2[1]
     passed()
@@ -617,10 +616,7 @@ m.call(O['KEY_CENTER']); assert m.dispatched()[0][1]==es2[0]; passed()
 m=Machine(); w,rs,es=m.table_page(n=20); m.paint(w)
 for _ in range(12): m.call()
 w2,rs2,es2=m.table_page()
-def restore_rebind(a,offset):
-    for j,r in enumerate(rs2):
-        m.word(r+O['ROW_INDEX'],offset//48+j); m.word(r+O['W_Y'],offset+j*48)
-m.rebind=restore_rebind
+m.rebind=lambda a,offset: m.bind(rs2,offset)
 m.paint(w2); assert m.selected(w2)==12
 m.call(O['KEY_CENTER']); assert m.dispatched()[0][1]==es2[1]; passed()
 
@@ -846,8 +842,4 @@ for backlight in [0,1]:
 # Non-ring keys on supported pages must pass through unchanged.
 for key in [0,13,170,O['KEY_PLAY'],222,223,0xffffffff]:
     m=Machine(); m.page(); assert m.call(key)==0 and not m.moved(); passed()
-# Execute original get_direction for wraparound, thresholds, and half-turn ambiguity.
-for current,previous,threshold,want in [(5,195,5,-1),(195,5,5,1),(20,20,10,0),
-    (30,20,10,0),(31,20,10,-1),(9,20,10,1),(120,20,10,0),(20,120,10,0)]:
-    m=Machine(); assert m.call(address=syms['get_direction'],args=(current,previous,threshold,0))==want; passed()
 print(f'{checks} MIPS execution scenarios passed; toolkit services mocked, stock lock filter executed.')

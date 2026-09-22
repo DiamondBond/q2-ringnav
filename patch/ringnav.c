@@ -50,15 +50,21 @@ typedef struct {
 /* Single shared view: no entry point keeps a menu live across a nested load(). */
 static menu_t g_menu __attribute__((section(".scratch")));
 
-/* Index of an audited top-window name, or -1. The index is remembered instead of the name
- * pointer: AWTK owns and frees the window's name string. */
-static int context_id(const char *name) {
-    static const char *const names[] = {
+/* Audited top windows, each tagged with its content-identity class. The index is remembered
+ * instead of the name pointer: AWTK owns and frees the window's name string. */
+enum { CTX_DYNAMIC, CTX_FIXED, CTX_FOLDER, CTX_LOCAL };
+typedef struct {
+    const char *name;
+    unsigned char kind;
+} context_t;
+static const context_t contexts[] = {
 #include "contexts.inc"
-    };
+};
+
+static int context_id(const char *name) {
     if (!name) return -1;
-    for (unsigned i = 0; i < sizeof(names) / sizeof(*names); ++i)
-        if (!tk_strcmp(name, names[i])) return (int)i;
+    for (unsigned i = 0; i < sizeof(contexts) / sizeof(*contexts); ++i)
+        if (!tk_strcmp(name, contexts[i].name)) return (int)i;
     return -1;
 }
 
@@ -249,39 +255,30 @@ static int context_now(unsigned *scope) {
     const char *name = top ? widget_get_prop_str(top, "name", (void *)0) : (void *)0;
     *scope = 0;
     if (!name) return -1;
+    int ctx = context_id(name);
+    if (ctx < 0) return -1;
     void *found[2];
     int count = 0, aborted = 0, budget = 512;
     find_surface(top, found, &count, &aborted, 0, &budget);
-    if (!tk_strcmp(name, "folder_page")) {
+    if (contexts[ctx].kind == CTX_FOLDER) {
         unsigned n = 0;
         while (n < 1024 && g_folder_path[n]) ++n;
         if (!n || n == 1024) return -1;
         *scope = hash_bytes(2166136261u, g_folder_path, n);
-    } else if (!tk_strcmp(name, "allmusic_page") || !tk_strcmp(name, "album_page") ||
-               !tk_strcmp(name, "albuminfo_page") || !tk_strcmp(name, "artistinfo_page") ||
-               !tk_strcmp(name, "playlist_page") || !tk_strcmp(name, "localclass_page")) {
+    } else if (contexts[ctx].kind == CTX_LOCAL) {
         unsigned h = hash_bytes(2166136261u, g_class_type, 4);
         h = hash_bytes(h, g_local_classinfo_save, 912);
         h = hash_bytes(h, g_artist_type, 4);
         *scope = hash_bytes(h, album_modetype, 4);
+    } else if (contexts[ctx].kind == CTX_FIXED) {
+        *scope = 1;
     } else {
-        /* Only fixed menus may restore by window name alone. Network/detail pages without an
-         * audited content key keep widget-owned selection, but never import another page's row. */
-        static const char *const fixed[] = {
-            "audiosetting_page", "localmusic_page", "dsdoutput_page",   "filter_page",
-            "memplay_page",      "playmode_page",   "playset_page",     "preseteq_page",
-            "replaygain_page",   "usbvol_page",     "about_page",       "autotime_page",
-            "btquality_page",    "datetime_page",   "display_page",     "fwupdate_page",
-            "keylock_page",      "language_page",   "lighttime_page",   "netservice_page",
-            "powermanager_page", "reset_page",      "screensaver_page", "standby_page",
-            "synclink_page",     "sysset_page"
-        };
-        for (unsigned i = 0; i < sizeof(fixed) / sizeof(*fixed); ++i)
-            if (!tk_strcmp(name, fixed[i])) *scope = 1;
-        if (!*scope) return -1;
+        /* Network/detail pages without an audited content key keep widget-owned selection, but
+         * never import another page's row. */
+        return -1;
     }
     if (!*scope) *scope = 1;
-    return !aborted && count == 1 ? context_id(name) : -1; /* no cross-pane position memory */
+    return !aborted && count == 1 ? ctx : -1; /* no cross-pane position memory */
 }
 
 static int index_of(menu_t *m, int id);

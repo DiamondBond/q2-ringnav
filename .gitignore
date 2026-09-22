@@ -2,9 +2,7 @@
 stock/
 work/
 build/
-build-final/
 dist/*
-!dist/manifest.json
 *.zip
 *.tar
 *.squashfs
