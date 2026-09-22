@@ -155,6 +155,12 @@ class Machine:
         child=self.node(t)
         self.top=self.node('window',name,[child])
         return child
+    def page_list(self,n=10,height=96,extent=960,name='sysset_page'):
+        """A page holding one scroll view of n 48px entries; returns (surface, entries)."""
+        w=self.page(name); self.word(w+O['W_H'],height); self.word(w+O['VIEW_CONTENT_H'],extent)
+        es=[self.entry(w,i*48) for i in range(n)]
+        self.nodes[w]['children']=es
+        return w,es
     def moved(self): return [x for x in self.calls if x[0] in ('scroll_view_scroll_delta_to','table_client_scroll_to','slide_menu_scroll_to_next','slide_menu_scroll_to_prev')]
     def dispatched(self): return [x for x in self.calls if x[0]=='stock_dispatch']
 
@@ -163,7 +169,7 @@ def passed():
     global checks
     checks+=1
 
-for t,off in [('scroll_view',0x84),('table_client',0x80)]:
+for t,off in [('scroll_view',O['SCROLL_Y']),('table_client',O['TABLE_TOP'])]:
     m=Machine(); w=m.page(t=t)
     for _ in range(20): assert m.call()==11
     assert m.get(w+off)==min(20*manifest['ring_step_pixels'],720 if t=='scroll_view' else 4560)
@@ -171,7 +177,8 @@ for t,off in [('scroll_view',0x84),('table_client',0x80)]:
     for _ in range(120): m.call(O['KEY_PREV'])
     assert m.get(w+off)==0
     # Empty/short lists consume input without turning into volume changes.
-    m.word(w+0x7c,0); assert m.call()==11 and m.get(w+off)==0
+    m.word(w+(O['VIEW_CONTENT_H'] if t=='scroll_view' else O['TABLE_ROWS']),0)
+    assert m.call()==11 and m.get(w+off)==0
     passed()
 
 for name in ['playing_page','volume_dialog','saverscreen_page','usbmode_page','unknown_page','equalizer_page']:
@@ -212,8 +219,7 @@ assert m.call()==11 and m.moved()[0][0]=='scroll_view_scroll_delta_to' and m.mov
 assert m.get(w+O['SCROLL_Y'])==148 and m.get(w+O['VIEW_ANIMATOR'])==0; passed()
 
 # Painting establishes selection without a sacrificial button press or native focus.
-m=Machine(); w=m.page(); m.word(w+O['W_H'],96); m.word(w+0x7c,1000)
-entries=[m.entry(w,i*48) for i in range(5)]; m.nodes[w]['children']=entries
+m=Machine(); w,entries=m.page_list(5,extent=1000)
 assert m.paint(w)==0 and m.selected(w)==0
 assert m.strokes[0][:4]==(1,1,238,46) and m.strokes[0][5]==0xffffffff
 assert m.clip==(0,0,240,240) and m.get(m.lcd+O['LCD_STROKE_COLOR'])==0x12345678
@@ -246,8 +252,7 @@ assert m.call(O['KEY_CENTER'])==11 and not m.dispatched()
 assert m.call()==11 and m.selected(w)==2
 m.pressed=0; passed()
 # With three rows in view the difference shows: the middle one wins, not the top edge.
-m=Machine(); w=m.page(); m.word(w+O['W_H'],192); m.word(w+0x7c,1000)
-es=[m.entry(w,i*48) for i in range(8)]; m.nodes[w]['children']=es
+m=Machine(); w,es=m.page_list(8,height=192,extent=1000)
 m.paint(w); m.touch(); m.word(w+O['SCROLL_Y'],200); m.word(w+O['VIEW_ANIMATOR'],0x1234)
 m.paint(w); assert m.selected(w)==0
 m.word(w+O['VIEW_ANIMATOR'],0); m.paint(w); assert m.selected(w)==6; passed()
@@ -259,165 +264,146 @@ assert m.call(O['KEY_CENTER'])==11 and len(m.dispatched())==1; passed()
 
 # Recycle a small row pool: selection belongs to the logical index, never the widget.
 m=Machine(); w=m.page('allmusic_page','table_client')
-m.word(w+0x78,48); m.word(w+0x7c,20); m.word(w+O['W_H'],96)
+m.word(w+O['ROW_HEIGHT'],48); m.word(w+O['TABLE_ROWS'],20); m.word(w+O['W_H'],96)
 rows=[m.node('table_row') for _ in range(4)]
 entries=[m.entry(r) for r in rows]; m.nodes[w]['children']=rows
 for r,e in zip(rows,entries): m.nodes[r]['children']=[e]; m.word(r+O['W_PARENT'],w)
 def rebind(a,offset):
     start=offset//48
     for j,r in enumerate(rows):
-        m.word(r+0x78,start+j); m.word(r+4,(start+j)*48)
+        m.word(r+O['ROW_INDEX'],start+j); m.word(r+O['W_Y'],(start+j)*48)
 m.rebind=rebind; rebind(w,0)
 m.paint(w); assert m.selected(w)==0
 assert m.call()==11 and m.selected(w)==1
-assert m.call()==11 and m.selected(w)==2 and m.get(w+0x80)==48
+assert m.call()==11 and m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==48
 assert m.moved()[-1][0]=='table_client_scroll_to'
 assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==entries[1]; passed()
 # A touch click in a rebound row immediately changes what centre opens.
 m.touch(); m.click(entries[0]); assert m.selected(w)==1
 assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==entries[0]; passed()
 # Swipe out of the old pool, then centre: settle/re-resolve before dispatch.
-m.touch(); m.word(w+0x80,480); rebind(w,480); m.word(w+O['TABLE_ANIMATOR'],0x9876)
+m.touch(); m.word(w+O['TABLE_TOP'],480); rebind(w,480); m.word(w+O['TABLE_ANIMATOR'],0x9876)
 assert m.call(O['KEY_CENTER'])==11 and m.selected(w)==10 and m.dispatched()[0][1]==entries[0]
 assert m.get(w+O['TABLE_ANIMATOR'])==0; passed()
 # Returning to a surviving menu keeps a valid selection; shrinking data repairs it.
 oldtop=m.top; m.page('playing_page'); assert m.call(O['KEY_CENTER'])==0
 m.top=oldtop; m.paint(w); assert m.selected(w)==10
-m.word(w+0x7c,1); m.word(w+0x80,0); rebind(w,0); m.paint(w)
+m.word(w+O['TABLE_ROWS'],1); m.word(w+O['TABLE_TOP'],0); rebind(w,0); m.paint(w)
 assert m.selected(w)==0; passed()
 
 # A recreated page recalls the last selected row and reveals it without a sacrificial press.
-m=Machine(); w=m.page(); m.word(w+O['W_H'],96); m.word(w+0x7c,1000)
-es=[m.entry(w,i*48) for i in range(10)]; m.nodes[w]['children']=es
+m=Machine(); w,es=m.page_list(10,extent=1000)
 m.paint(w)
 for _ in range(5): assert m.call()==11
 assert m.selected(w)==5 and m.get(w+O['SCROLL_Y'])==192
-w2=m.page(); m.word(w2+O['W_H'],96); m.word(w2+0x7c,1000)
-es2=[m.entry(w2,i*48) for i in range(10)]; m.nodes[w2]['children']=es2
+w2,es2=m.page_list(10,extent=1000)
 assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+O['SCROLL_Y'])==192
 assert m.strokes[-2][:4]==(1,49,238,46)
 assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==es2[5]; passed()
 
 # Memory is per audited context: visiting another page leaves it alone.
-w3=m.page('display_page'); m.word(w3+O['W_H'],96); m.word(w3+0x7c,1000)
-es3=[m.entry(w3,i*48) for i in range(10)]; m.nodes[w3]['children']=es3
+w3,es3=m.page_list(10,extent=1000,name='display_page')
 assert m.paint(w3)==0 and m.selected(w3)==0
-w4=m.page(); m.word(w4+O['W_H'],96); m.word(w4+0x7c,1000)
-es4=[m.entry(w4,i*48) for i in range(10)]; m.nodes[w4]['children']=es4
+w4,es4=m.page_list(10,extent=1000)
 assert m.paint(w4)==0 and m.selected(w4)==5; passed()
 
 # A stale remembered row is ignored when the new list is shorter.
-w5=m.page(); m.word(w5+O['W_H'],96); m.word(w5+0x7c,300)
-es5=[m.entry(w5,i*48) for i in range(2)]; m.nodes[w5]['children']=es5
+w5,es5=m.page_list(2,extent=300)
 assert m.paint(w5)==0 and m.selected(w5)==0
 assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==es5[0]; passed()
 
 # A settled swipe stores the row the user sees, not the pre-swipe selection.
-m=Machine(); w=m.page(); m.word(w+O['W_H'],96); m.word(w+0x7c,1000)
-es=[m.entry(w,i*48) for i in range(10)]; m.nodes[w]['children']=es
+m=Machine(); w,es=m.page_list(10,extent=1000)
 m.paint(w); m.touch(); m.word(w+O['SCROLL_Y'],240); m.word(w+O['VIEW_ANIMATOR'],0x1234)
 m.paint(w); assert m.selected(w)==0
 m.word(w+O['VIEW_ANIMATOR'],0); m.paint(w); assert m.selected(w)==5
-w2=m.page(); m.word(w2+O['W_H'],96); m.word(w2+0x7c,1000)
-es2=[m.entry(w2,i*48) for i in range(10)]; m.nodes[w2]['children']=es2
+w2,es2=m.page_list(10,extent=1000)
 assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+O['SCROLL_Y'])==192; passed()
 
 # Position memory follows row text across a recreation, not just the index.
-m=Machine(); w=m.page(); m.word(w+O['W_H'],96); m.word(w+0x7c,1000)
-es=[m.entry(w,i*48) for i in range(6)]; m.nodes[w]['children']=es
+m=Machine(); w,es=m.page_list(6,extent=1000)
 for i,e in enumerate(es): m.nodes[e]['text']='track %d'%i
 m.paint(w)
 for _ in range(4): assert m.call()==11
 assert m.selected(w)==4
-w2=m.page(); m.word(w2+O['W_H'],96); m.word(w2+0x7c,1000)
+w2,es2=m.page_list(6,extent=1000)
 order=[4,0,1,2,3,5]
-es2=[m.entry(w2,i*48) for i in range(6)]; m.nodes[w2]['children']=es2
 for i,e in enumerate(es2): m.nodes[e]['text']='track %d'%order[i]
 assert m.paint(w2)==0 and m.selected(w2)==0
 assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==es2[0]; passed()
 # Rows without text fall back to the remembered index.
-m=Machine(); w=m.page(); m.word(w+O['W_H'],96); m.word(w+0x7c,1000)
-es=[m.entry(w,i*48) for i in range(6)]; m.nodes[w]['children']=es
+m=Machine(); w,es=m.page_list(6,extent=1000)
 m.paint(w)
 for _ in range(3): assert m.call()==11
 assert m.selected(w)==3
-w2=m.page(); m.word(w2+O['W_H'],96); m.word(w2+0x7c,1000)
-es2=[m.entry(w2,i*48) for i in range(6)]; m.nodes[w2]['children']=es2
+w2,es2=m.page_list(6,extent=1000)
 assert m.paint(w2)==0 and m.selected(w2)==3; passed()
 
 # An interrupted recall glide keeps the remembered row instead of adopting a visible one.
-m=Machine(); w=m.page(); m.word(w+O['W_H'],96); m.word(w+0x7c,1000)
-es=[m.entry(w,i*48) for i in range(10)]; m.nodes[w]['children']=es
+m=Machine(); w,es=m.page_list(10,extent=1000)
 m.paint(w)
 for _ in range(5): assert m.call()==11
-w2=m.page(); m.word(w2+O['W_H'],96); m.word(w2+0x7c,1000)
-es2=[m.entry(w2,i*48) for i in range(10)]; m.nodes[w2]['children']=es2
+w2,es2=m.page_list(10,extent=1000)
 m.glide=False
 assert m.touch()==0
 m.paint(w2); assert m.selected(w2)==5
-w3=m.page(); m.word(w3+O['W_H'],96); m.word(w3+0x7c,1000)
-es3=[m.entry(w3,i*48) for i in range(10)]; m.nodes[w3]['children']=es3
+w3,es3=m.page_list(10,extent=1000)
 assert m.paint(w3)==0 and m.selected(w3)==5; passed()
 # A wheel detent right after recreation computes its glide from the live offset.
-m=Machine(); w=m.page(); m.word(w+O['W_H'],96); m.word(w+0x7c,1000)
-es=[m.entry(w,i*48) for i in range(10)]; m.nodes[w]['children']=es
+m=Machine(); w,es=m.page_list(10,extent=1000)
 m.paint(w)
 for _ in range(5): assert m.call()==11
-w2=m.page(); m.word(w2+O['W_H'],96); m.word(w2+0x7c,1000)
-es2=[m.entry(w2,i*48) for i in range(10)]; m.nodes[w2]['children']=es2
+w2,es2=m.page_list(10,extent=1000)
 m.glide=False
 assert m.call()==11 and m.selected(w2)==6
 assert m.moved()[-1][0]=='scroll_view_scroll_delta_to' and m.moved()[-1][3]==240; passed()
 
 # A live list whose row count changes resets the selection without re-reading the table.
-m=Machine(); w=m.page(); m.word(w+O['W_H'],96); m.word(w+0x7c,1000)
-es=[m.entry(w,i*48) for i in range(10)]; m.nodes[w]['children']=es
+m=Machine(); w,es=m.page_list(10,extent=1000)
 m.paint(w)
 for _ in range(5): assert m.call()==11
 assert m.selected(w)==5
-m.nodes[w]['children']=es[:6]; m.word(w+0x7c,6*48); m.word(w+O['SCROLL_Y'],0)
+m.nodes[w]['children']=es[:6]; m.word(w+O['VIEW_CONTENT_H'],6*48); m.word(w+O['SCROLL_Y'],0)
 m.paint(w); assert m.selected(w)==0; passed()
 
 # Virtual music tables recall a logical row and scroll to it on recreation.
 m=Machine(); w=m.page('allmusic_page','table_client')
-m.word(w+0x78,48); m.word(w+0x7c,20); m.word(w+O['W_H'],96)
+m.word(w+O['ROW_HEIGHT'],48); m.word(w+O['TABLE_ROWS'],20); m.word(w+O['W_H'],96)
 rows=[m.node('table_row') for _ in range(4)]
 entries=[m.entry(r) for r in rows]; m.nodes[w]['children']=rows
 for j,(r,e) in enumerate(zip(rows,entries)):
-    m.nodes[r]['children']=[e]; m.word(r+O['W_PARENT'],w); m.word(r+0x78,j); m.word(r+4,j*48)
+    m.nodes[r]['children']=[e]; m.word(r+O['W_PARENT'],w); m.word(r+O['ROW_INDEX'],j); m.word(r+O['W_Y'],j*48)
 m.paint(w)
 for _ in range(2): assert m.call()==11
-assert m.selected(w)==2 and m.get(w+0x80)==48
+assert m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==48
 m.rebind=None
 w2=m.page('allmusic_page','table_client')
-m.word(w2+0x78,48); m.word(w2+0x7c,20); m.word(w2+O['W_H'],96)
+m.word(w2+O['ROW_HEIGHT'],48); m.word(w2+O['TABLE_ROWS'],20); m.word(w2+O['W_H'],96)
 rows2=[m.node('table_row') for _ in range(4)]
 entries2=[m.entry(r) for r in rows2]; m.nodes[w2]['children']=rows2
 for j,(r,e) in enumerate(zip(rows2,entries2)):
-    m.nodes[r]['children']=[e]; m.word(r+O['W_PARENT'],w2); m.word(r+0x78,j); m.word(r+4,j*48)
-m.paint(w2); assert m.selected(w2)==2 and m.get(w2+0x80)==48
+    m.nodes[r]['children']=[e]; m.word(r+O['W_PARENT'],w2); m.word(r+O['ROW_INDEX'],j); m.word(r+O['W_Y'],j*48)
+m.paint(w2); assert m.selected(w2)==2 and m.get(w2+O['TABLE_TOP'])==48
 assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==entries2[2]; passed()
 
 # Home keeps its native carousel presentation and value (including touch changes).
-m=Machine(); w=m.page('home_page','slide_menu'); m.word(w+0x78,1)
+m=Machine(); w=m.page('home_page','slide_menu'); m.word(w+O['SLIDE_INDEX'],1)
 child=[m.entry(w),m.entry(w)]; m.nodes[w]['children']=child
 assert m.paint(w)==0 and not m.strokes
 assert any(c[0]=='stock_paint' for c in m.calls)
 assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==child[1]
-m.word(w+0x78,0)
+m.word(w+O['SLIDE_INDEX'],0)
 assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==child[0]; passed()
 # Long-press/boot release must reach stock cleanup, never activate a menu item.
-for addr in [syms['g_power_longkey'],syms['g_ingore_bootkey_flag'],0xa37c8a]:
+for addr in [syms['g_power_longkey'],syms['g_ingore_bootkey_flag'],O['BOOT_KEY_GUARD']]:
     m.byte(addr,1); assert m.call(O['KEY_CENTER'])==0 and not m.dispatched(); m.byte(addr,0); passed()
 # A quick second centre release reaches stock, whose short press toggles the screen.
-m=Machine(); w=m.page(); m.word(w+O['W_H'],96)
-es=[m.entry(w,i*48) for i in range(3)]; m.nodes[w]['children']=es
+m=Machine(); w,es=m.page_list(3)
 assert m.call(O['KEY_CENTER'])==11 and len(m.dispatched())==1
 assert m.call(O['KEY_CENTER'],gap=100)==0 and not m.dispatched()
 assert m.call(O['KEY_CENTER'],gap=100)==11 and len(m.dispatched())==1; passed()
 # A wheel detent ends the double-click window: the next press selects instead.
-m=Machine(); w=m.page(); m.word(w+O['W_H'],96)
-es=[m.entry(w,i*48) for i in range(3)]; m.nodes[w]['children']=es
+m=Machine(); w,es=m.page_list(3)
 assert m.call(O['KEY_CENTER'])==11 and len(m.dispatched())==1
 m.call(gap=50)
 assert m.call(O['KEY_CENTER'],gap=50)==11 and len(m.dispatched())==1; passed()
@@ -426,21 +412,17 @@ m=Machine(); w=m.page()
 assert m.call(O['KEY_CENTER'])==11 and not m.dispatched()
 assert m.call(O['KEY_CENTER'],gap=100)==11 and not m.dispatched(); passed()
 # A touch between the releases cancels the pair: the second press selects again.
-m=Machine(); w=m.page(); m.word(w+O['W_H'],96)
-es=[m.entry(w,i*48) for i in range(3)]; m.nodes[w]['children']=es
+m=Machine(); w,es=m.page_list(3)
 assert m.call(O['KEY_CENTER'])==11 and len(m.dispatched())==1
 m.call(address=HOOKS['on_wm_tsdown_before_fun'][0], gap=100)
 assert m.call(O['KEY_CENTER'],gap=100)==11 and m.dispatched()[0][1]==es[0]; passed()
 # A different top window cancels the pair too: no screen toggle after navigation.
-m=Machine(); w=m.page('sysset_page'); m.word(w+O['W_H'],96)
-es=[m.entry(w,i*48) for i in range(3)]; m.nodes[w]['children']=es
+m=Machine(); w,es=m.page_list(3)
 assert m.call(O['KEY_CENTER'])==11 and len(m.dispatched())==1
-w2=m.page('display_page'); m.word(w2+O['W_H'],96)
-es2=[m.entry(w2,i*48) for i in range(3)]; m.nodes[w2]['children']=es2
+w2,es2=m.page_list(3,name='display_page')
 assert m.call(O['KEY_CENTER'],gap=100)==11 and m.dispatched()[0][1]==es2[0]; passed()
 # Fast same-direction detents accelerate; a slow detent or a reversal starts over.
-m=Machine(); w=m.page(); m.word(w+O['W_H'],96); m.word(w+0x7c,40*48)
-es=[m.entry(w,i*48) for i in range(40)]; m.nodes[w]['children']=es
+m=Machine(); w,es=m.page_list(40,extent=40*48)
 m.paint(w)
 assert m.call(O['KEY_NEXT'])==11 and m.selected(w)==1
 assert m.call(O['KEY_NEXT'],gap=50)==11 and m.selected(w)==2
@@ -458,10 +440,10 @@ assert m.call(O['KEY_PREV'],gap=50)==11 and m.selected(w)==38
 assert m.call(O['KEY_NEXT'],gap=1000)==11 and m.selected(w)==39; passed()
 # Fast detents accelerate the pixel-scroll fallback the same way.
 m=Machine(); w=m.page(t='table_client')
-assert m.call(gap=50)==11 and m.get(w+0x80)==48
-assert m.call(gap=50)==11 and m.get(w+0x80)==96
-assert m.call(gap=50)==11 and m.get(w+0x80)==192
-assert m.call(gap=1000)==11 and m.get(w+0x80)==240; passed()
+assert m.call(gap=50)==11 and m.get(w+O['TABLE_TOP'])==48
+assert m.call(gap=50)==11 and m.get(w+O['TABLE_TOP'])==96
+assert m.call(gap=50)==11 and m.get(w+O['TABLE_TOP'])==192
+assert m.call(gap=1000)==11 and m.get(w+O['TABLE_TOP'])==240; passed()
 # A click on a clickable child selects its collected ancestor, not a stale row.
 m=Machine(); w=m.page(); m.word(w+O['W_H'],96)
 row1=m.entry(w,0); row2=m.entry(w,96); deep=m.entry(row1,0)
@@ -477,7 +459,7 @@ for name in ('canvas_get_clip_rect','canvas_set_clip_rect','canvas_set_stroke_co
     del m.handlers[syms[name]]
 m.handlers[syms['lcd_stroke_rect']]='lcd_stroke_rect'
 m.word(m.lcd+0x3c,1); m.word(m.lcd+0xb0,240); m.word(m.lcd+0xb4,240)
-m.word(m.canvas,7); m.word(m.canvas+4,20)
+m.word(m.canvas+O['CANVAS_X'],7); m.word(m.canvas+O['CANVAS_Y'],20)
 for off,val in [(0x10,10),(0x14,30),(0x18,229),(0x1c,199)]: m.word(m.canvas+off,val)
 m.paint(w)
 assert m.strokes[0][:4]==(8,69,238,46)
@@ -485,8 +467,7 @@ assert m.strokes[0][4:]==((10,30,220,86),0xffffffff)
 assert [m.get(m.canvas+off) for off in (0x10,0x14,0x18,0x1c)]==[10,30,229,199]
 assert m.get(m.lcd+O['LCD_STROKE_COLOR'])==0x12345678; passed()
 # Centre and rapid wheel reversals retain the selected item during an unfinished wheel glide.
-m=Machine(); w=m.page(); m.word(w+O['W_H'],96)
-es=[m.entry(w,i*48) for i in range(6)]; m.nodes[w]['children']=es
+m=Machine(); w,es=m.page_list(6)
 m.paint(w); m.glide=False
 m.call(); m.call(); assert m.selected(w)==2 and m.get(w+O['SCROLL_Y'])==0
 m.paint(w); assert m.selected(w)==2
@@ -504,7 +485,7 @@ m.paint(w); assert m.selected(w)==0 and m.strokes[0][4]==(0,0,240,96); passed()
 # The actual stock filter runs first, including each screen-off lock mode.
 for backlight in [0,1]:
     for mode in range(4):
-        for key in [170,171,172,173,218,222,223,42]:
+        for key in [170,O['KEY_PLAY'],O['KEY_PREV'],O['KEY_NEXT'],O['KEY_CENTER'],222,223,42]:
             results=[]
             for patched in [False,True]:
                 m=Machine(patched); m.page('playing_page')
@@ -514,7 +495,7 @@ for backlight in [0,1]:
             assert results[0]==results[1],(backlight,mode,key,results)
             passed()
 # Non-ring keys on supported pages must pass through unchanged.
-for key in [0,13,170,171,222,223,0xffffffff]:
+for key in [0,13,170,O['KEY_PLAY'],222,223,0xffffffff]:
     m=Machine(); m.page(); assert m.call(key)==0 and not m.moved(); passed()
 # Execute original get_direction for wraparound, thresholds, and half-turn ambiguity.
 for current,previous,threshold,want in [(5,195,5,-1),(195,5,5,1),(20,20,10,0),

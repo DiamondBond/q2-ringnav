@@ -24,10 +24,8 @@ typedef struct {
     unsigned last_wheel;        /* time of the previous wheel detent */
     int wheel_dir;              /* direction of that detent */
     unsigned wheel_run;         /* consecutive fast detents in that direction */
-    int pos_ctx[POS_MEM];       /* audited context index + 1, 0 when the slot is unused */
-    int pos_id[POS_MEM];        /* last selected logical row in that context */
-    unsigned pos_hash[POS_MEM]; /* row text hash; 0 when the row has no usable text */
-    unsigned pos_next;          /* round-robin victim once the table is full */
+    int pos_id[POS_MEM];        /* last selected logical row + 1 per audited context; 0 = unused */
+    unsigned pos_hash[POS_MEM]; /* that row's text hash; 0 when the row has no usable text */
     void *reveal_surface;       /* surface of the interrupted recall glide, 0 when none */
     int reveal_id;              /* logical row that glide was bringing into view */
 } scratch_t;
@@ -186,17 +184,6 @@ static void prop(void *w, const char *name, int value) {
     if (widget_get_prop_int(w, name, -1) != value) widget_set_prop_int(w, name, value);
 }
 
-static int pos_slot(int ctx, int create) {
-    if (ctx < 0) return -1;
-    for (int i = 0; i < POS_MEM; ++i)
-        if (st.pos_ctx[i] == ctx + 1) return i;
-    if (!create) return -1;
-    unsigned i = st.pos_next++ % POS_MEM;
-    st.pos_ctx[i] = ctx + 1;
-    st.pos_hash[i] = 0;
-    return (int)i;
-}
-
 /* FNV-1a of the first non-empty text property in a small row subtree; 0 means "no identity". */
 static const char *row_text(void *w, int depth, int *budget) {
     if (!w || depth == 4 || --*budget < 0) return (void *)0;
@@ -220,10 +207,9 @@ static unsigned row_hash(void *w) {
 }
 
 static int recall(int ctx, unsigned *hash) {
-    int i = pos_slot(ctx, 0);
-    if (i < 0) return -1;
-    if (hash) *hash = st.pos_hash[i];
-    return st.pos_id[i];
+    if (ctx < 0 || ctx >= POS_MEM) return -1;
+    if (hash) *hash = st.pos_hash[ctx];
+    return st.pos_id[ctx] - 1;
 }
 
 /* Context of the active top window; every caller already holds a navigation surface. */
@@ -233,21 +219,21 @@ static int context_now(void) {
 }
 
 static int index_of(menu_t *m, int id);
-static void reveal(menu_t *m, int id);
+static void reveal(menu_t *m, int id, int cancel);
 
 /* Remember where the user was. Widget props die with a recreated page; this survives it.
  * Non-virtual lists also remember the row text, so a reordered list restores the same item. */
 static void select(menu_t *m, int id) {
     unsigned hash = 0;
     if (id >= 0) {
+        int ctx = context_now();
         if (m->kind == 1) {
             int i = index_of(m, id);
             if (i >= 0) hash = row_hash(m->at[i]);
         }
-        int slot = pos_slot(context_now(), 1);
-        if (slot >= 0) {
-            st.pos_id[slot] = id;
-            st.pos_hash[slot] = hash;
+        if (ctx >= 0 && ctx < POS_MEM) {
+            st.pos_id[ctx] = id + 1;
+            st.pos_hash[ctx] = hash;
         }
     }
     prop(m->w, SEL, id);
@@ -302,7 +288,7 @@ static int load(menu_t *m, void *w) {
         }
         if (id >= 0 && id < m->rows) {
             prop(w, SEL, id);
-            reveal(m, id);
+            reveal(m, id, 0);
             if (m->kind == 1) {
                 st.reveal_surface = m->w;
                 st.reveal_id = id;
@@ -315,6 +301,11 @@ static int load(menu_t *m, void *w) {
 /* Live viewport offset. reveal glides are relative, so every delta is computed against the
  * position the widget is actually at, never an intended one. */
 static int view_top(menu_t *m) { return m->kind == 2 ? I(m->w, TABLE_TOP) : I(m->w, SCROLL_Y); }
+
+/* Largest viewport top that still shows content; the clamp bound for every glide. */
+static int max_top(menu_t *m) {
+    return (m->kind == 2 ? m->rows * m->row : I(m->w, VIEW_CONTENT_H)) - m->height;
+}
 
 static rect_t bounds(menu_t *m, int i) {
     void *e = m->at[i];
@@ -352,8 +343,9 @@ static void stop_scroll(menu_t *m) {
     }
 }
 
-/* Least viewport move that makes logical row id fully visible; no animator if already visible. */
-static void reveal(menu_t *m, int id) {
+/* Least viewport move that makes logical row id fully visible; no animator if already visible.
+ * cancel stops a glide away from the live viewport, for a wheel reversal into it. */
+static void reveal(menu_t *m, int id, int cancel) {
     int top = view_top(m);
     int y, h;
     if (m->kind == 2) {
@@ -367,9 +359,11 @@ static void reveal(menu_t *m, int id) {
         h = r.h;
     }
     int want = y < top ? y : y + h > top + m->height ? y + h - m->height : top;
-    want = clamp_step(want, (m->kind == 2 ? m->rows * m->row : I(m->w, VIEW_CONTENT_H)) - m->height,
-                      0);
-    if (want == top) return;
+    want = clamp_step(want, max_top(m), 0);
+    if (want == top) {
+        if (cancel && moving(m)) stop_scroll(m);
+        return;
+    }
     if (m->kind == 2) {
         stop_scroll(m);
         table_client_scroll_to(m->w, want);
@@ -396,7 +390,7 @@ static int reconcile(menu_t *m, int settle) {
         return -1;
     if (m->kind == 1 && st.reveal_surface == m->w && st.reveal_id == id) {
         st.reveal_surface = (void *)0;
-        reveal(m, id);
+        reveal(m, id, 0);
         return cur;
     }
     int best = -1, best_dist = 0, partial = -1, partial_dist = 0, had = id >= 0;
@@ -458,7 +452,6 @@ int ringnav_touch(void *ctx, void *event) {
     st.last_center = 0;
     st.center_top = st.center_surface = (void *)0;
     st.last_wheel = 0;
-    st.wheel_run = 0;
     void *w = surface();
     if (!result && w && load(&g_menu, w)) {
         stop_scroll(&g_menu);
@@ -530,7 +523,6 @@ int ringnav(void *ctx, void *event) {
         st.center_top = top;
         st.center_surface = w;
         st.last_wheel = 0; /* A press ends any spin. */
-        st.wheel_run = 0;
         select(&g_menu, g_menu.id[cur]);
         widget_invalidate_force(w, (void *)0);
         char click[0x30];
@@ -548,41 +540,16 @@ int ringnav(void *ctx, void *event) {
         else
             slide_menu_scroll_to_prev(w);
     } else if (g_menu.n) {
-        int top = view_top(&g_menu);
         int id = widget_get_prop_int(w, SEL, -1);
-        int next = id < 0 ? (cur >= 0 ? g_menu.id[cur] : 0) : id + dir * step;
-        if (next < 0) next = 0;
-        if (next >= g_menu.rows) next = g_menu.rows - 1;
+        int next = clamp_step(id < 0 ? (cur >= 0 ? g_menu.id[cur] : 0) : id + dir * step,
+                              g_menu.rows - 1, 0);
         if (next == id) return STOP;
-        int y, h;
-        if (g_menu.kind == 2) {
-            y = next * g_menu.row;
-            h = g_menu.row;
-        } else {
-            rect_t r = bounds(&g_menu, next);
-            y = r.y + top;
-            h = r.h;
-        }
-        int want = y < top ? y : y + h > top + g_menu.height ? y + h - g_menu.height : top;
-        want = clamp_step(want,
-                          (g_menu.kind == 2 ? g_menu.rows * g_menu.row : I(w, VIEW_CONTENT_H)) -
-                              g_menu.height,
-                          0);
         select(&g_menu, next);
         /* Reversing into the current viewport must cancel the previous glide away from it. */
-        if (want == top && moving(&g_menu)) stop_scroll(&g_menu);
-        if (want != top) {
-            if (g_menu.kind == 2) {
-                stop_scroll(&g_menu);
-                table_client_scroll_to(w, want);
-            } else
-                scroll_view_scroll_delta_to(w, 0, want - top, GLIDE_MS);
-        }
+        reveal(&g_menu, next, 1);
     } else {
         int top = view_top(&g_menu);
-        int max =
-            (g_menu.kind == 2 ? g_menu.rows * g_menu.row : I(w, VIEW_CONTENT_H)) - g_menu.height;
-        int next = clamp_step(top, max, dir * RING_STEP * step);
+        int next = clamp_step(top, max_top(&g_menu), dir * RING_STEP * step);
         if (g_menu.kind == 2) {
             stop_scroll(&g_menu);
             table_client_scroll_to(w, next);
