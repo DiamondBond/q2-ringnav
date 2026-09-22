@@ -120,7 +120,7 @@ def compile_payload(out):
     run('llvm-objcopy','-O','binary',out/'patch.elf',out/'patch.bin')
     return symbols(out/'patch.elf')
 
-def build(zip_path, out, logo=None):
+def build(zip_path, out, logo):
     out.mkdir(parents=True, exist_ok=True)
     check(not (out/'update.tar').exists(), 'Output already exists; use a fresh --out directory')
     source = source_sha256()
@@ -224,14 +224,13 @@ def build(zip_path, out, logo=None):
     import shlex
     replacement = b'release/bin/demo F '+b' '.join(old.groups())+b' cat '+shlex.quote(str(out/'demo')).encode()
     p = p[:old.start()]+replacement+p[old.end():]
-    if logo is not None:
-        data = logo.read_bytes()
-        check(data[:2] == b'\xff\xd8', 'Logo must be a JPEG')
-        check(jpeg_size(data) == (320, 375), 'Logo must be 320x375 like the stock splash')
-        line = re.search(rb'^release/assets/default/raw/images/xx/logo\.jpg R (\d+) (\d+) (\d+) (\d+) .+$', p, re.M)
-        check(line is not None, 'Missing stock logo inode')
-        replacement = b'release/assets/default/raw/images/xx/logo.jpg F '+b' '.join(line.groups())+b' cat '+shlex.quote(str(logo)).encode()
-        p = p[:line.start()]+replacement+p[line.end():]
+    data = logo.read_bytes()
+    check(data[:2] == b'\xff\xd8', 'Logo must be a JPEG')
+    check(jpeg_size(data) == (320, 375), 'Logo must be 320x375 like the stock splash')
+    line = re.search(rb'^release/assets/default/raw/images/xx/logo\.jpg R (\d+) (\d+) (\d+) (\d+) .+$', p, re.M)
+    check(line is not None, 'Missing stock logo inode')
+    replacement = b'release/assets/default/raw/images/xx/logo.jpg F '+b' '.join(line.groups())+b' cat '+shlex.quote(str(logo)).encode()
+    p = p[:line.start()]+replacement+p[line.end():]
     pseudo.write_bytes(p)
     (out/'empty').mkdir()
     newsq = out/'rootfs.squashfs'
@@ -262,8 +261,7 @@ def build(zip_path, out, logo=None):
         version=VERSION, hooks=hooks,
         patch_symbols={n:hex(v) for n,v in ps.items() if n.startswith('stock_')},
         tools={t:run(t,'--version').splitlines()[0] for t in ['clang','ld.lld','llvm-objcopy']})
-    if logo is not None:
-        manifest['logo_sha256'] = sha(logo.read_bytes())
+    manifest['logo_sha256'] = sha(logo.read_bytes())
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     print(json.dumps({k:manifest[k] for k in ['update_sha256','patch_bytes','version']},indent=2))
 

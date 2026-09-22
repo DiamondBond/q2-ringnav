@@ -8,7 +8,7 @@
 #define ACCEL_DIV 3
 #define ACCEL_MAX 8
 #define MAX_ENTRIES 512
-#define POS_MEM 128
+#define POS_MEM 64
 /* RADIUS, FILL_RGB, FILL_ALPHA and SHADE_ALPHA come from offsets.inc; the colors pack their bytes
  * at compile time (little-endian r,g,b,a). The outline is opaque neutral white, never the playing
  * red, seated on a dark shade of the stock surface so bright album art cannot wash it out. */

@@ -100,19 +100,18 @@ class Machine:
         out=bytearray()
         while (c:=self.u.mem_read(a,1))!=b'\0': out+=c; a+=1
         return out.decode()
-    def node(self,t='scroll_view',name='',children=(),visible=1,enable=1,**kw):
-        a=self.alloc(); self.nodes[a]=dict(type=t,name=name,children=list(children),visible=visible,enable=enable,**kw)
+    def node(self,t='scroll_view',name='',children=(),visible=1,**kw):
+        a=self.alloc(); self.nodes[a]=dict(type=t,name=name,children=list(children),visible=visible,enable=1,**kw)
         self.word(a+O['W_W'],240); self.word(a+O['W_H'],240); self.word(a+O['ROW_HEIGHT'],48)
         self.word(a+(O['VIEW_CONTENT_H'] if t=='scroll_view' else O['TABLE_ROWS']),960 if t=='scroll_view' else 100)
         self.byte(a+O['VIEW_VERTICAL'],1)
         return a
-    def entry(self,parent,y=0,index=None,t='list_item'):
+    def entry(self,parent,y=0):
         """A leafless tap target: emitter with one EVT_CLICK item, widget_y offset y, height 48."""
-        a=self.node(t)
+        a=self.node('list_item')
         em=self.alloc(4); it=self.alloc(0x28)
         self.word(a+O['W_EMITTER'],em); self.word(em,it); self.word(it+O['EMIT_TYPE'],O['EVT_CLICK'])
         self.word(a+O['W_PARENT'],parent); self.word(a+O['W_Y'],y); self.word(a+O['W_H'],48)
-        if index is not None: self.word(a+O['ROW_INDEX'],index)
         return a
     def selected(self,w): return self.nodes[w].get('_ringnav_index',-1)
     def paint(self,w): return self.call(address=HOOKS['widget_on_paint_border'][0],args=(w,self.canvas,0,0))
@@ -187,9 +186,7 @@ class Machine:
             ret=0
         elif name=='lcd_get_vgcanvas': ret=self.fake_vg
         elif name.startswith('vg:'):
-            self.vg_calls.append((name[3:],signed(a),signed(b),signed(c),signed(d),
-                                  u.reg_read(UC_MIPS_REG_F12),u.reg_read(UC_MIPS_REG_F14),
-                                  self.get(u.reg_read(UC_MIPS_REG_SP)+16)))
+            self.vg_calls.append((name[3:],signed(a),signed(b)))
             ret=1 if name[3:]=='vgcanvas_save' else 0
         elif name.startswith('float:'):
             x=struct.unpack('<f',struct.pack('<I',u.reg_read(UC_MIPS_REG_F12)))[0]
@@ -212,7 +209,7 @@ class Machine:
     def call(self,key=O['KEY_NEXT'],address=HOOK,args=None,event_type=0x114,gap=1000,stack=()):
         # Independent input steps occur after the stock key debounce timer expires.
         self.now+=gap
-        self.byte(0xa37c89,0)
+        self.byte(0xa37c89,0)  # stock key filter latch; reached as 0x7c89(base) in the demo
         self.calls=[]; self.strokes=[]; self.rounded=[]; self.vg_calls=[]
         self.word(self.event+O['EVENT_KEY'],key)
         self.word(self.event+O['EVENT_TYPE'],event_type)
@@ -241,10 +238,10 @@ class Machine:
         """Reindex a recycled row pool the way the stock table rebind does."""
         for j,r in enumerate(rows):
             self.word(r+O['ROW_INDEX'],offset//48+j); self.word(r+O['W_Y'],offset+j*48)
-    def table_page(self,n=4,rows=20,height=96):
+    def table_page(self,n=4):
         """A table_client page of n recycled rows; returns (surface, row widgets, entries)."""
         w=self.page('allmusic_page','table_client')
-        self.word(w+O['ROW_HEIGHT'],48); self.word(w+O['TABLE_ROWS'],rows); self.word(w+O['W_H'],height)
+        self.word(w+O['ROW_HEIGHT'],48); self.word(w+O['TABLE_ROWS'],20); self.word(w+O['W_H'],96)
         rs=[self.node('table_row') for _ in range(n)]
         es=[self.entry(r) for r in rs]; self.nodes[w]['children']=rs
         for r,e in zip(rs,es):
