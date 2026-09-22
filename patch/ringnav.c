@@ -33,6 +33,7 @@ typedef struct {
     int pos_id[POS_MEM];         /* last selected logical row + 1 per audited context; 0 = unused */
     unsigned pos_hash[POS_MEM];  /* hash of the row's first text; 0 when the row has none */
     unsigned pos_hash2[POS_MEM]; /* hash of its second text; 0 when the row has only one */
+    unsigned pos_scope[POS_MEM]; /* browsing identity, never shared by unrelated lists */
     void *reveal_surface;        /* surface of the interrupted recall glide, 0 when none */
     int reveal_id;               /* logical row that glide was bringing into view */
 } scratch_t;
@@ -43,7 +44,8 @@ typedef struct {
 } rect_t;
 typedef struct {
     void *w, *at[MAX_ENTRIES];
-    int id[MAX_ENTRIES], n, kind, rows, row, height;
+    int id[MAX_ENTRIES], n, kind, rows, row, height, ctx;
+    unsigned scope;
 } menu_t;
 /* Single shared view: no entry point keeps a menu live across a nested load(). */
 static menu_t g_menu __attribute__((section(".scratch")));
@@ -147,6 +149,7 @@ static void collect(void *w, entries_t *s, int depth) {
 #define SEL "_ringnav_index"
 #define TOUCH "_ringnav_touch"
 #define COUNT "_ringnav_count"
+#define SCOPE "_ringnav_scope"
 
 static int usable(void) {
     return g_backlight_status && !g_lockscreen_pageflag && !g_testmode_flag && !g_guideflag &&
@@ -157,25 +160,37 @@ static int allowed_top(void *top) {
     return top && context_id(widget_get_prop_str(top, "name", (void *)0)) >= 0;
 }
 
-/* The navigable pane under an already allowlisted top window. With two visible panes, only the
- * one that already holds the selection is used; anything else stays untouched, never guessed. */
-static void *surface_under(void *top) {
+/* A click identifies its pane by ancestry. Without a click, two visible panes require exactly
+ * one existing selection; never guess which pane the wheel should control. */
+static void *surface_under(void *top, void *target, void **other) {
     void *found[2] = { (void *)0, (void *)0 };
     int count = 0, aborted = 0, budget = 512;
     find_surface(top, found, &count, &aborted, 0, &budget);
     if (aborted || count == 0) return (void *)0;
     if (count == 1) return found[0];
+    if (target) {
+        for (int depth = 0; target && depth < 32; ++depth) {
+            for (int i = 0; i < count; ++i)
+                if (target == found[i]) {
+                    if (other) *other = found[1 - i];
+                    return found[i];
+                }
+            if (target == top) break;
+            target = P(target, W_PARENT);
+        }
+        return (void *)0;
+    }
     int first = widget_get_prop_int(found[0], SEL, -1) >= 0;
     int second = widget_get_prop_int(found[1], SEL, -1) >= 0;
     return first == second ? (void *)0 : (first ? found[0] : found[1]);
 }
 
-static void *surface(void) {
+static void *surface(void *target, void **other) {
     if (!usable()) return (void *)0;
     void *wm = window_manager();
     if (window_manager_is_animating(wm)) return (void *)0;
     void *top = window_manager_get_top_window(wm);
-    return allowed_top(top) ? surface_under(top) : (void *)0;
+    return allowed_top(top) ? surface_under(top, target, other) : (void *)0;
 }
 
 static void prop(void *w, const char *name, int value) {
@@ -190,14 +205,18 @@ typedef struct {
     unsigned one, two;
 } row_id_t;
 
-static void row_hash_text(const char *s, unsigned *h) {
+static void row_hash_text(const unsigned *s, unsigned *h) {
     *h = 2166136261u;
-    for (; *s; ++s) *h = (*h ^ (unsigned char)*s) * 16777619u;
+    /* Stock wchar_t is UTF-32. Hash all four bytes, including zero bytes within a character. */
+    for (; *s; ++s)
+        for (unsigned shift = 0; shift < 32; shift += 8)
+            *h = (*h ^ ((*s >> shift) & 255)) * 16777619u;
+    if (!*h) *h = 1; /* zero denotes missing text */
 }
 
 static void row_id_walk(void *w, int depth, int *budget, row_id_t *id) {
     if (!w || depth == 4 || id->two || --*budget < 0) return;
-    const char *s = widget_get_prop_str(w, "text", (void *)0);
+    const unsigned *s = widget_get_text(w);
     if (s && *s) {
         if (!id->one)
             row_hash_text(s, &id->one);
@@ -217,10 +236,53 @@ static row_id_t row_id(void *w) {
     return id;
 }
 
-/* Context of the active top window; every caller already holds a navigation surface. */
-static int context_now(void) {
+static unsigned hash_bytes(unsigned h, const unsigned char *s, unsigned n) {
+    for (unsigned i = 0; i < n; ++i) h = (h ^ s[i]) * 16777619u;
+    return h;
+}
+
+/* The local list loaders use these browsing globals: folder_enter/back maintain g_folder_path;
+ * load_localclass_list/load_album_detaillist use the class, saved query and artist/album modes.
+ * Hash the bounded query object, including its flags, rather than a title or a freed pointer.
+ * ponytail: one remembered content scope per window type; a history cache can follow if needed. */
+static int context_now(unsigned *scope) {
     void *top = window_manager_get_top_window(window_manager());
-    return top ? context_id(widget_get_prop_str(top, "name", (void *)0)) : -1;
+    const char *name = top ? widget_get_prop_str(top, "name", (void *)0) : (void *)0;
+    *scope = 0;
+    if (!name) return -1;
+    void *found[2];
+    int count = 0, aborted = 0, budget = 512;
+    find_surface(top, found, &count, &aborted, 0, &budget);
+    if (!tk_strcmp(name, "folder_page")) {
+        unsigned n = 0;
+        while (n < 1024 && g_folder_path[n]) ++n;
+        if (!n || n == 1024) return -1;
+        *scope = hash_bytes(2166136261u, g_folder_path, n);
+    } else if (!tk_strcmp(name, "allmusic_page") || !tk_strcmp(name, "album_page") ||
+               !tk_strcmp(name, "albuminfo_page") || !tk_strcmp(name, "artistinfo_page") ||
+               !tk_strcmp(name, "playlist_page") || !tk_strcmp(name, "localclass_page")) {
+        unsigned h = hash_bytes(2166136261u, g_class_type, 4);
+        h = hash_bytes(h, g_local_classinfo_save, 912);
+        h = hash_bytes(h, g_artist_type, 4);
+        *scope = hash_bytes(h, album_modetype, 4);
+    } else {
+        /* Only fixed menus may restore by window name alone. Network/detail pages without an
+         * audited content key keep widget-owned selection, but never import another page's row. */
+        static const char *const fixed[] = {
+            "audiosetting_page", "localmusic_page", "dsdoutput_page",   "filter_page",
+            "memplay_page",      "playmode_page",   "playset_page",     "preseteq_page",
+            "replaygain_page",   "usbvol_page",     "about_page",       "autotime_page",
+            "btquality_page",    "datetime_page",   "display_page",     "fwupdate_page",
+            "keylock_page",      "language_page",   "lighttime_page",   "netservice_page",
+            "powermanager_page", "reset_page",      "screensaver_page", "standby_page",
+            "synclink_page",     "sysset_page"
+        };
+        for (unsigned i = 0; i < sizeof(fixed) / sizeof(*fixed); ++i)
+            if (!tk_strcmp(name, fixed[i])) *scope = 1;
+        if (!*scope) return -1;
+    }
+    if (!*scope) *scope = 1;
+    return !aborted && count == 1 ? context_id(name) : -1; /* no cross-pane position memory */
 }
 
 static int index_of(menu_t *m, int id);
@@ -230,9 +292,10 @@ static void reveal(menu_t *m, int id, int cancel);
  * Non-virtual lists also remember the row's first two text values, so a reordered list restores
  * the same item and duplicate names can be told apart by their second line. */
 static void select(menu_t *m, int id) {
+    if (st.reveal_surface == m->w) st.reveal_surface = (void *)0;
     unsigned hash = 0, hash2 = 0;
     if (id >= 0) {
-        int ctx = context_now();
+        int ctx = m->ctx;
         if (m->kind == 1) {
             int i = index_of(m, id);
             if (i >= 0) {
@@ -245,12 +308,13 @@ static void select(menu_t *m, int id) {
             st.pos_id[ctx] = id + 1;
             st.pos_hash[ctx] = hash;
             st.pos_hash2[ctx] = hash2;
+            st.pos_scope[ctx] = m->scope;
         }
     }
     prop(m->w, SEL, id);
 }
 
-static int load(menu_t *m, void *w) {
+static int load_rows(menu_t *m, void *w) {
     m->w = w;
     m->n = 0;
     m->kind = kind(w);
@@ -280,7 +344,19 @@ static int load(menu_t *m, void *w) {
             }
         }
     }
+    return 1;
+}
+
+static int load(menu_t *m, void *w) {
+    if (!load_rows(m, w)) return 0;
+    m->ctx = context_now(&m->scope);
     int count = widget_get_prop_int(w, COUNT, -1);
+    unsigned scope = (unsigned)widget_get_prop_int(w, SCOPE, 0);
+    if (scope != m->scope) {
+        count = -1;
+        prop(w, SCOPE, (int)m->scope);
+        if (st.reveal_surface == w) st.reveal_surface = (void *)0;
+    }
     if (count != m->rows) {
         prop(w, SEL, -1);
         prop(w, COUNT, m->rows);
@@ -291,7 +367,8 @@ static int load(menu_t *m, void *w) {
      * remembered first text, breaks ties by the second text and then by the remembered index,
      * and falls back to the index when no text matches. */
     if (m->kind != 3 && count < 0) {
-        int ctx = context_now();
+        int ctx = m->ctx;
+        if (ctx >= 0 && ctx < POS_MEM && st.pos_scope[ctx] != m->scope) ctx = -1;
         int id = ctx >= 0 && ctx < POS_MEM ? st.pos_id[ctx] - 1 : -1;
         unsigned hash = 0, hash2 = 0;
         if (ctx >= 0 && ctx < POS_MEM) {
@@ -319,10 +396,10 @@ static int load(menu_t *m, void *w) {
         if (id >= 0 && id < m->rows) {
             prop(w, SEL, id);
             reveal(m, id, 0);
-            if (m->kind == 1) {
-                st.reveal_surface = m->w;
-                st.reveal_id = id;
-            }
+            st.reveal_surface = m->w;
+            st.reveal_id = id;
+            /* A synchronous table rebind changes the row pool; discard the pre-scroll snapshot. */
+            if (m->kind == 2) return load_rows(m, w);
         }
     }
     return 1;
@@ -418,9 +495,10 @@ static int reconcile(menu_t *m, int settle) {
         if (!settle) return cur;
     } else if (id >= 0 && id < m->rows && !settle)
         return -1;
-    if (m->kind == 1 && st.reveal_surface == m->w && st.reveal_id == id) {
+    if (st.reveal_surface == m->w && st.reveal_id == id) {
         st.reveal_surface = (void *)0;
         reveal(m, id, 0);
+        if (m->kind == 2) return load_rows(m, m->w) ? index_of(m, id) : -1;
         return cur;
     }
     int best = -1, best_dist = 0, partial = -1, partial_dist = 0, had = id >= 0;
@@ -454,7 +532,7 @@ static int reconcile(menu_t *m, int settle) {
  * flag. Small rows and degenerate geometry keep the square fallback. */
 int ringnav_paint(void *w, void *canvas) {
     int result = stock_paint(w, canvas);
-    if (!w || !canvas || !kind(w) || surface() != w) return result;
+    if (!w || !canvas || !kind(w) || surface((void *)0, (void *)0) != w) return result;
     if (!load(&g_menu, w) || g_menu.kind == 3) return result; /* Home shows its selected card. */
     int i = reconcile(&g_menu,
                       !moving(&g_menu) && !window_manager_get_pointer_pressed(window_manager()));
@@ -511,7 +589,7 @@ int ringnav_touch(void *ctx, void *event) {
     st.last_center = 0;
     st.center_top = st.center_surface = (void *)0;
     st.last_wheel = 0;
-    void *w = surface();
+    void *w = surface((void *)0, (void *)0);
     if (!result && w && load(&g_menu, w)) {
         stop_scroll(&g_menu);
         prop(w, TOUCH, 1);
@@ -535,10 +613,16 @@ static int selects(menu_t *m, void *target) {
  * Do not turn pointer-down into selection: a swipe is not a tap. */
 int ringnav_dispatch(void *target, void *event) {
     if (target && event && I(event, EVENT_TYPE) == EVT_CLICK) {
-        void *w = surface();
+        void *other = (void *)0;
+        void *w = surface(target, &other);
         if (w && load(&g_menu, w)) {
             int i = selects(&g_menu, target);
             if (i >= 0) {
+                stop_scroll(&g_menu); /* an explicit tap replaces any pending recall glide */
+                if (other) {
+                    prop(other, SEL, -1);
+                    widget_invalidate_force(other, (void *)0);
+                }
                 select(&g_menu, g_menu.id[i]);
                 widget_invalidate_force(w, (void *)0);
             }
@@ -560,7 +644,7 @@ int ringnav(void *ctx, void *event) {
     void *wm = window_manager(), *top = window_manager_get_top_window(wm);
     if (!allowed_top(top)) return result;
     if (window_manager_is_animating(wm) || window_manager_get_pointer_pressed(wm)) return STOP;
-    void *w = surface_under(top);
+    void *w = surface_under(top, (void *)0, (void *)0);
     int dir = key == KEY_NEXT ? 1 : key == KEY_PREV ? -1 : 0;
     if (!w) return dir ? STOP : result;
     if (!load(&g_menu, w)) return dir ? STOP : result;

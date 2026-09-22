@@ -5,7 +5,7 @@ Requires unicorn==2.1.4. Does not emulate the entire device or flash hardware.
 import json, math, pathlib, re, struct, sys
 from unicorn import Uc, UcError, UC_ARCH_MIPS, UC_MODE_MIPS32, UC_MODE_LITTLE_ENDIAN, UC_HOOK_CODE
 from unicorn.mips_const import *
-from build import segments, symbols, HOOK, HOOKS, FUNCTIONS, GLOBALS, ROOT, source_sha256
+from build import segments, symbols, HOOK, HOOKS, FUNCTIONS, GLOBALS, CONTEXT_DATA, ROOT, source_sha256
 B=pathlib.Path(sys.argv[1] if len(sys.argv)>1 else 'build')
 manifest=json.loads((B/'manifest.json').read_text())
 if manifest.get('source_sha256') != source_sha256():
@@ -72,6 +72,8 @@ class Machine:
         for n in VG_MOCKS: self.handlers[syms[n]]='vg:'+n
         self.u.hook_add(UC_HOOK_CODE,self.hook)
         for name in GLOBALS: self.byte(syms[name],0)
+        for name,size in CONTEXT_DATA.items(): self.u.mem_write(syms[name],bytes(size))
+        self.word(syms['g_class_type'],0xf001)
         self.byte(syms['g_backlight_status'],1)
     def probe_canvas(self, lcd_type=1):
         """Real stock canvas code runs; mock only the services it reaches."""
@@ -88,7 +90,11 @@ class Machine:
     def get(self,a): return struct.unpack('<I',self.u.mem_read(a,4))[0]
     def alloc(self,n=0x200): a=self.next; self.next+=n; return a
     def string(self,s):
-        a=self.alloc((len(s)+4)&~3); self.u.mem_write(a,s.encode()+b'\0'); return a
+        data=s.encode()+b'\0'
+        a=self.alloc((len(data)+3)&~3); self.u.mem_write(a,data); return a
+    def wide_string(self,s):
+        data=(s+'\0').encode('utf-32-le')
+        a=self.alloc(len(data)); self.u.mem_write(a,data); return a
     def text(self,a):
         if not a: return ''
         out=bytearray()
@@ -128,7 +134,10 @@ class Machine:
         elif name=='window_manager_get_pointer_pressed': ret=self.pressed
         elif name=='widget_get_visible': ret=n.get('visible',0)
         elif name=='widget_get_type': ret=self.string(n.get('type',''))
-        elif name=='widget_get_prop_str': ret=self.string(n.get(self.text(b),''))
+        elif name=='widget_get_prop_str':
+            # Stock text is VALUE_TYPE_WSTRING; value_str does not convert it to UTF-8.
+            ret=0 if self.text(b)=='text' else self.string(n.get(self.text(b),''))
+        elif name=='widget_get_text': ret=self.wide_string(n.get('text',''))
         elif name in ('widget_get_prop_bool','widget_get_prop_int'): ret=n.get(self.text(b),c)
         elif name=='widget_count_children': ret=len(n['children'])
         elif name=='widget_get_child': ret=n['children'][b] if b<len(n['children']) else 0
@@ -475,6 +484,73 @@ w2,es2=m.page_list(4,extent=1000)
 m.nodes[es2[0]]['text']='Intro'; m.nodes[es2[3]]['text']='Intro'
 assert m.paint(w2)==0 and m.selected(w2)==0; passed()
 
+# Run the actual stock label text accessor, including value_wstr and the label vtable.
+# U+0100 and U+0200 share a low zero byte; titles/subtitles must use complete code points.
+m=Machine(); w,es=m.page_list(4,extent=1000)
+del m.handlers[syms['widget_get_text']]
+m.handlers[syms['strcmp@GLIBC_2.0']]='tk_strcmp'
+def stock_text(e,text):
+    m.word(e+0x74,syms['g_label_vtable'])
+    m.word(e+0x38,len(text)); m.word(e+0x40,m.wide_string(text))
+for i,e in enumerate(es):
+    stock_text(e,'\u0100 Intro')
+    sub=m.node('label'); stock_text(sub,['\u0100','\u0200','\U0001f600','音楽'][i])
+    m.nodes[e]['children']=[sub]
+# The narrow accessor really returns NULL, even though widget_get_text sees the label.
+del m.handlers[syms['widget_get_prop_str']]
+assert m.call(address=syms['widget_get_prop_str'],args=(es[0],m.string('text'),0,0))==0
+m.handlers[syms['widget_get_prop_str']]='widget_get_prop_str'
+m.paint(w); m.call(); assert m.selected(w)==1
+w2,es2=m.page_list(4,extent=1000)
+for i,e in enumerate(es2):
+    stock_text(e,'\u0100 Intro')
+    sub=m.node('label'); stock_text(sub,['\u0100','\U0001f600','音楽','\u0200'][i])
+    m.nodes[e]['children']=[sub]
+assert m.paint(w2)==0 and m.selected(w2)==3
+assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==es2[3]; passed()
+
+# Folder memory belongs to the full path, even when every visible row title is identical.
+m=Machine(); m.u.mem_write(syms['g_folder_path'],b'/sd/Folder A\0')
+w,es=m.page_list(8,name='folder_page')
+for e in es: m.nodes[e]['text']='Intro'
+m.paint(w)
+for _ in range(5): m.call()
+w2,es2=m.page_list(8,name='folder_page')
+for e in es2: m.nodes[e]['text']='Intro'
+m.paint(w2); assert m.selected(w2)==5  # same path still recalls
+m.u.mem_write(syms['g_folder_path'],b'/sd/Folder B\0')
+w3,es3=m.page_list(8,name='folder_page')
+for e in es3: m.nodes[e]['text']='Intro'
+m.paint(w3); assert m.selected(w3)==0
+# A surviving surface rebound to another folder also resets, even at the same row count.
+for _ in range(3): m.call()
+m.u.mem_write(syms['g_folder_path'],b'/sd/Folder C\0')
+m.word(w3+O['SCROLL_Y'],0); m.paint(w3); assert m.selected(w3)==0; passed()
+# An unavailable or unterminated path cannot supply a content identity.
+for path in (b'\0',b'x'*1024):
+    m=Machine(); m.u.mem_write(syms['g_folder_path'],path)
+    w,es=m.page_list(8,name='folder_page'); m.paint(w); m.call(); m.call()
+    w2,es2=m.page_list(8,name='folder_page'); m.paint(w2)
+    assert m.selected(w2)==0; passed()
+
+# Same-sized local lists must not inherit selection across query or browsing-mode changes.
+for changed in ('g_class_type','g_local_classinfo_save','g_artist_type','album_modetype'):
+    m=Machine(); w,rs,es=m.table_page(); m.paint(w); m.call(); m.call()
+    w2,rs2,es2=m.table_page(); m.paint(w2); assert m.selected(w2)==2
+    m.word(syms[changed],m.get(syms[changed])+1)
+    w3,rs3,es3=m.table_page(); m.paint(w3); assert m.selected(w3)==0
+    m.call(); m.call()
+    m.word(syms[changed],m.get(syms[changed])+1)
+    m.word(w3+O['TABLE_TOP'],0); m.paint(w3); assert m.selected(w3)==0
+    passed()
+# Without an audited content identity, a recreated detail/network page starts fresh.
+for name in ('netdiskfolder_page','tidal_albuminfo_page','playerqueue_page'):
+    m=Machine(); w,es=m.page_list(8,name=name); m.paint(w)
+    for _ in range(3): m.call()
+    m.paint(w); assert m.selected(w)==3
+    w2,es2=m.page_list(8,name=name); m.paint(w2); assert m.selected(w2)==0
+    passed()
+
 # An interrupted recall glide keeps the remembered row instead of adopting a visible one.
 m=Machine(); w,es=m.page_list(10,extent=1000)
 m.paint(w)
@@ -511,6 +587,42 @@ m.rebind=None
 w2,_,entries2=m.table_page()
 m.paint(w2); assert m.selected(w2)==2 and m.get(w2+O['TABLE_TOP'])==48
 assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==entries2[2]; passed()
+
+# Table recall survives interruption even when the target is outside the recycled row pool.
+for wanted in (2,12):
+    m=Machine(); w,rs,es=m.table_page(n=20); m.paint(w)
+    for _ in range(wanted): m.call()
+    w2,rs2,es2=m.table_page(); m.glide=False
+    m.touch(); m.paint(w2)
+    assert m.selected(w2)==wanted and m.moved()[-1][2]==(wanted-1)*48
+    # Rebind the pool as the restarted glide completes.
+    top=(wanted-1)*48
+    m.word(w2+O['TABLE_TOP'],top); m.word(w2+O['TABLE_ANIMATOR'],0)
+    for j,r in enumerate(rs2):
+        m.word(r+O['ROW_INDEX'],wanted-1+j); m.word(r+O['W_Y'],top+j*48)
+    m.paint(w2); assert m.selected(w2)==wanted
+    m.call(O['KEY_CENTER']); assert m.dispatched()[0][1]==es2[1]
+    passed()
+# A wheel during recall advances the logical target; an explicit tap instead replaces it.
+m=Machine(); w,rs,es=m.table_page(n=20); m.paint(w)
+for _ in range(12): m.call()
+w2,rs2,es2=m.table_page(); m.glide=False
+m.touch(); m.call(); assert m.selected(w2)==13
+m.click(es2[0]); assert m.get(w2+O['TABLE_ANIMATOR'])==0
+m.paint(w2)
+assert m.selected(w2)==0
+m.call(O['KEY_CENTER']); assert m.dispatched()[0][1]==es2[0]; passed()
+
+# A synchronous restore rebind must discard the pre-scroll pool before centre dispatch.
+m=Machine(); w,rs,es=m.table_page(n=20); m.paint(w)
+for _ in range(12): m.call()
+w2,rs2,es2=m.table_page()
+def restore_rebind(a,offset):
+    for j,r in enumerate(rs2):
+        m.word(r+O['ROW_INDEX'],offset//48+j); m.word(r+O['W_Y'],offset+j*48)
+m.rebind=restore_rebind
+m.paint(w2); assert m.selected(w2)==12
+m.call(O['KEY_CENTER']); assert m.dispatched()[0][1]==es2[1]; passed()
 
 # Home keeps its native carousel presentation and value (including touch changes).
 m=Machine(); w=m.page('home_page','slide_menu'); m.word(w+O['SLIDE_INDEX'],1)
@@ -636,6 +748,24 @@ m.paint(w)
 assert m.get(m.lcd+O['LCD_FILL_COLOR'])==0x00000001 and m.get(m.lcd+O['LCD_STROKE_COLOR'])==0x80ffffff
 assert m.u.mem_read(m.canvas+0x0e,1)[0]==0x7f and m.u.mem_read(m.lcd+0xe4,1)[0]==0x11
 assert m.global_alpha==0 and m.clip==(0,0,240,240); passed()
+
+# Taps choose their pane even with no initial owner or with both panes previously selected.
+for seeded in ((),(0,),(0,1)):
+    m=Machine(); a=m.node(); b=m.node()
+    ae=[m.entry(a,i*48) for i in range(4)]; be=[m.entry(b,i*48) for i in range(4)]
+    m.nodes[a]['children']=ae; m.nodes[b]['children']=be
+    nested=m.entry(be[1]); m.nodes[be[1]]['children']=[nested]
+    m.top=m.node('window','album_page',[a,b])
+    for i in seeded: m.nodes[(a,b)[i]]['_ringnav_index']=0
+    m.touch(); m.click(nested)
+    assert m.selected(a)==-1 and m.selected(b)==1
+    m.paint(a); assert not m.rounded and not m.strokes
+    m.paint(b); assert m.rounded
+    m.call(O['KEY_CENTER']); assert m.dispatched()[0][1]==be[1]
+    m.call(); assert m.selected(b)==2
+    m.touch(); m.click(ae[0]); m.call(O['KEY_CENTER'])
+    assert m.selected(b)==-1 and m.dispatched()[0][1]==ae[0]
+    passed()
 
 # An inactive pane is never painted, so the outline cannot appear on two panes at once.
 m=Machine(); a=m.node(); b=m.node()

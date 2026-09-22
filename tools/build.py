@@ -75,6 +75,7 @@ FUNCTIONS = {
  'widget_get_prop_bool': ('int', 'void *, const char *, int'),
  'widget_get_prop_int': ('int', 'void *, const char *, int'),
  'widget_get_prop_str': ('const char *', 'void *, const char *, const char *'),
+ 'widget_get_text': ('const unsigned *', 'void *'),
  'widget_get_type': ('const char *', 'void *'),
  'widget_count_children': ('unsigned', 'void *'),
  'widget_get_child': ('void *', 'void *, unsigned'),
@@ -101,6 +102,9 @@ FUNCTIONS = {
 GLOBALS = ['g_backlight_status', 'g_lockscreen_pageflag', 'g_testmode_flag',
            'g_guideflag', 'g_poweroff_state', 'g_usblink_status', 'bt__recv_pageflag',
            'g_power_longkey', 'g_ingore_bootkey_flag']
+# Audited stock browsing state (not playback state); sizes are checked against the ELF.
+CONTEXT_DATA = {'g_folder_path': 1024, 'g_class_type': 4,
+                'g_local_classinfo_save': 912, 'g_artist_type': 4, 'album_modetype': 4}
 
 FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
          '-mno-abicalls','-fno-pic','-G0','-ffreestanding','-fno-builtin',
@@ -165,6 +169,11 @@ def build(zip_path, out, logo=None):
         header.append(f'#define {name} (({ret} (*)({args}))0x{syms[name]:x}u)')
     for name in GLOBALS:
         header.append(f'#define {name} (*(volatile unsigned char *)0x{syms[name]:x}u)')
+    symbol_table = run('readelf', '-Ws', demo)
+    for name, size in CONTEXT_DATA.items():
+        check(re.search(rf'\b{size}\s+OBJECT\s+GLOBAL\s+DEFAULT\s+\d+\s+{name}$',
+                        symbol_table, re.M), f'{name}: context data size mismatch')
+        header.append(f'#define {name} ((const unsigned char *)0x{syms[name]:x}u)')
     (out/'stock.h').write_text('\n'.join(header)+'\n')
     ps = compile_payload(out)
     payload = (out/'patch.bin').read_bytes()
