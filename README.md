@@ -11,7 +11,7 @@ The touchscreen still works normally. Outside supported menus, the wheel still c
 ## Install
 
 1. Download the firmware ZIP from the latest release.
-2. Unzip it and copy `update.bin` to the root of your microSD card.
+2. Unzip it and copy `update.tar` to the root of your microSD card.
 3. On the Q2, go to **System settings → System Update → TF card update**.
 4. Confirm the update and wait for the player to restart.
 5. Check **About** and make sure it shows `V1.7R`.
