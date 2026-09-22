@@ -30,10 +30,6 @@ If UI is not working, use [Shanling's recovery package](https://drive.google.com
 
 [Shanling Q2 official firmware](https://en.shanling.com/download/150)
 
-## Custom boot logo
-
-Rebuilt firmware uses `assets/logo.jpg` as the boot splash by default. Pass another 320x375 JPEG with `--logo` to use your own — see [docs/boot-logo.md](docs/boot-logo.md).
-
 ## Controls
 
 - Turn the scroll wheel to move through menu items; a fast spin skips further.
@@ -89,6 +85,10 @@ A native click chooses its pane from the actual target before walking up to the 
 The canvas hook intersects the existing clip with the viewport and restores the clip, the LCD fill color and the LCD stroke color; this firmware's `canvas_save/restore` do not save those properties. The outline is one translucent fill (`0x402b2b2b`, a per-color alpha) plus two concentric one-pixel `canvas_stroke_rounded_rect` calls, a dark separator at radius 9 and the white line at radius 8, with `bg_r = NULL`. The separator is the stock dark surface at `0xb32b2b2b`, so it disappears on the dark theme and only shows over bright artwork. It never calls `canvas_set_global_alpha`, so the shared alpha is untouched. A rounded call that reports failure, or a row too small for the corner radius, keeps the square separator-plus-white outline instead.
 
 Navigation requires a supported top-window name from `patch/contexts.inc`, screen-on and no lock/test/guide/power-off/USB-link/Bluetooth-receive screen, and a navigable pane: a vertical `scroll_view`, a `table_client` or a `slide_menu`. Horizontal and page-snapping scroll views are not candidates, so they cannot make a page look like it has two panes. When two panes are visible and neither owns the selection, the first wheel turn chooses the first pane in UI order. Later turns follow the selected pane, and tapping a row switches ownership. If both panes already hold a selection, the wheel event is left alone. Only active `pages` children are searched. The bounded walk collects at most 512 targets in a non-virtual list; virtual music tables navigate by total logical row count instead.
+
+## Custom boot logo
+
+Rebuilt firmware uses `assets/logo.jpg` as the boot splash by default. Pass another 320x375 JPEG with `--logo` to use your own — see [docs/boot-logo.md](docs/boot-logo.md).
 
 ## Build and validation
 
