@@ -13,7 +13,10 @@
 
 static int eq(const char *a, const char *b) {
     if (!a || !b) return 0;
-    while (*a && *a == *b) { ++a; ++b; }
+    while (*a && *a == *b) {
+        ++a;
+        ++b;
+    }
     return *a == *b;
 }
 
@@ -30,7 +33,10 @@ static int allowed(const char *name) {
  * ponytail: bounded tree walk per detent; cache only if measured UI cost warrants it. */
 static void find_surface(void *w, void **found, int *count, int depth, int *budget) {
     if (!w || !widget_get_visible(w) || !widget_get_prop_bool(w, "enable", 1)) return;
-    if (depth == 16 || --*budget < 0) { *count = 2; return; }
+    if (depth == 16 || --*budget < 0) {
+        *count = 2;
+        return;
+    }
     const char *type = widget_get_type(w);
     if (eq(type, "scroll_view") || eq(type, "table_client") || eq(type, "slide_menu")) {
         *found = w;
@@ -64,14 +70,20 @@ static int clickable(void *w) {
     return 0;
 }
 
-typedef struct { void **at; int n, cap, budget; } entries_t;
+typedef struct {
+    void **at;
+    int n, cap, budget;
+} entries_t;
 
 /* Visible, enabled tap targets in pre-order; a target's descendants belong to it.
  * ponytail: capped walk; raise MAX_ENTRIES if a real list outgrows it. */
 static void collect(void *w, entries_t *s, int depth) {
     if (!w || !widget_get_visible(w) || !widget_get_prop_bool(w, "enable", 1)) return;
     if (depth == 16 || s->n == s->cap || --s->budget < 0) return;
-    if (clickable(w)) { s->at[s->n++] = w; return; }
+    if (clickable(w)) {
+        s->at[s->n++] = w;
+        return;
+    }
     unsigned n = widget_count_children(w);
     for (unsigned i = 0; i < n; ++i) collect(widget_get_child(w, i), s, depth + 1);
 }
@@ -88,22 +100,25 @@ static void *first_entry(void *w) {
 #define TOUCH "_ringnav_touch"
 #define COUNT "_ringnav_count"
 
-typedef struct { int x, y, w, h; } rect_t;
+typedef struct {
+    int x, y, w, h;
+} rect_t;
 typedef struct {
     void *w, *at[MAX_ENTRIES];
     int id[MAX_ENTRIES], n, kind, rows, row, top, height;
 } menu_t;
 
 static int usable(void) {
-    return g_backlight_status && !g_lockscreen_pageflag && !g_testmode_flag &&
-        !g_guideflag && !g_poweroff_state && g_usblink_status != 2 && !bt__recv_pageflag;
+    return g_backlight_status && !g_lockscreen_pageflag && !g_testmode_flag && !g_guideflag &&
+           !g_poweroff_state && g_usblink_status != 2 && !bt__recv_pageflag;
 }
 
 static void *surface(void) {
     if (!usable()) return (void *)0;
     void *wm = window_manager(), *top = window_manager_get_top_window(wm);
     if (!top || window_manager_is_animating(wm) ||
-        !allowed(widget_get_prop_str(top, "name", (void *)0))) return (void *)0;
+        !allowed(widget_get_prop_str(top, "name", (void *)0)))
+        return (void *)0;
     void *w = (void *)0;
     int count = 0, budget = 512;
     find_surface(top, &w, &count, 0, &budget);
@@ -122,7 +137,10 @@ static void prop(void *w, const char *name, int value) {
 }
 
 static int load(menu_t *m, void *w) {
-    m->w = w; m->n = 0; m->kind = kind(w); m->height = I(w, 0x0c);
+    m->w = w;
+    m->n = 0;
+    m->kind = kind(w);
+    m->height = I(w, 0x0c);
     if (!m->kind || m->height <= 0) return 0;
     m->top = m->kind == 3 ? 0 : I(w, m->kind == 2 ? 0x80 : 0x84);
     m->row = m->kind == 2 ? I(w, 0x78) : 0;
@@ -133,7 +151,8 @@ static int load(menu_t *m, void *w) {
     if (m->kind == 1) {
         entries_t s = { m->at, 0, MAX_ENTRIES, 2048 };
         for (unsigned i = 0; i < n; ++i) collect(widget_get_child(w, i), &s, 1);
-        m->n = s.n; m->rows = s.n;
+        m->n = s.n;
+        m->rows = s.n;
         for (int i = 0; i < m->n; ++i) m->id[i] = i;
     } else {
         if (m->kind == 3) m->rows = (int)n;
@@ -141,21 +160,24 @@ static int load(menu_t *m, void *w) {
             void *r = widget_get_child(w, i), *e = first_entry(r);
             int id = m->kind == 2 ? I(r, 0x78) : (int)i;
             if (e && id >= 0 && id < m->rows) {
-                m->at[m->n] = e; m->id[m->n++] = id;
+                m->at[m->n] = e;
+                m->id[m->n++] = id;
             }
         }
     }
     if (widget_get_prop_int(w, COUNT, -1) != m->rows) {
-        prop(w, SEL, -1); prop(w, COUNT, m->rows);
+        prop(w, SEL, -1);
+        prop(w, COUNT, m->rows);
     }
     return 1;
 }
 
 static rect_t bounds(menu_t *m, int i) {
     void *e = m->at[i];
-    rect_t r = {0, 0, I(e, 8), I(e, 0x0c)};
+    rect_t r = { 0, 0, I(e, 8), I(e, 0x0c) };
     for (void *p = e; p && p != m->w; p = P(p, 0x48)) {
-        r.x += I(p, 0); r.y += I(p, 4);
+        r.x += I(p, 0);
+        r.y += I(p, 4);
     }
     if (m->kind != 3) r.y -= m->top;
     if (m->kind == 1) r.x -= I(m->w, 0x80);
@@ -163,21 +185,24 @@ static rect_t bounds(menu_t *m, int i) {
 }
 
 static int index_of(menu_t *m, int id) {
-    for (int i = 0; i < m->n; ++i) if (m->id[i] == id) return i;
+    for (int i = 0; i < m->n; ++i)
+        if (m->id[i] == id) return i;
     return -1;
 }
 
 static int moving(menu_t *m) {
-    return m->kind == 1 ? P(m->w, 0xe8) != 0 :
-        m->kind == 2 ? P(m->w, 0xd0) != 0 : 0;
+    return m->kind == 1 ? P(m->w, 0xe8) != 0 : m->kind == 2 ? P(m->w, 0xd0) != 0 : 0;
 }
 
 static void stop_scroll(menu_t *m) {
-    if (m->kind == 2) table_client_stop_animator_scroll(m->w);
+    if (m->kind == 2)
+        table_client_stop_animator_scroll(m->w);
     else if (m->kind == 1 && P(m->w, 0xe8)) {
         /* Same pause/destroy/null sequence as stock table_client_stop_animator_scroll. */
         void *a = P(m->w, 0xe8);
-        widget_animator_pause(a); widget_animator_destroy(a); P(m->w, 0xe8) = (void *)0;
+        widget_animator_pause(a);
+        widget_animator_destroy(a);
+        P(m->w, 0xe8) = (void *)0;
     }
 }
 
@@ -197,7 +222,8 @@ static int reconcile(menu_t *m, int settle) {
     if (cur >= 0) {
         rect_t r = bounds(m, cur);
         if ((r.y < m->height && r.y + r.h > 0) || !settle) return cur;
-    } else if (id >= 0 && id < m->rows && !settle) return -1;
+    } else if (id >= 0 && id < m->rows && !settle)
+        return -1;
     cur = first >= 0 ? first : partial;
     prop(m->w, SEL, cur >= 0 ? m->id[cur] : -1);
     return cur;
@@ -216,10 +242,12 @@ int ringnav_paint(void *w, void *canvas) {
     if (r.w < 5 || r.h < 5 || !P(canvas, 0x38)) return result;
     canvas_get_clip_rect(canvas, &old);
     int x = I(canvas, 0), y = I(canvas, 4);
-    clip.x = old.x > x ? old.x : x; clip.y = old.y > y ? old.y : y;
+    clip.x = old.x > x ? old.x : x;
+    clip.y = old.y > y ? old.y : y;
     int right = old.x + old.w < x + I(w, 8) ? old.x + old.w : x + I(w, 8);
     int bottom = old.y + old.h < y + m.height ? old.y + old.h : y + m.height;
-    clip.w = right - clip.x; clip.h = bottom - clip.y;
+    clip.w = right - clip.x;
+    clip.h = bottom - clip.y;
     if (clip.w <= 0 || clip.h <= 0) return result;
     unsigned color = (unsigned)I(P(canvas, 0x38), 0xc0);
     canvas_set_clip_rect(canvas, &clip);
@@ -236,7 +264,8 @@ int ringnav_touch(void *ctx, void *event) {
     void *w = surface();
     menu_t m;
     if (!result && w && load(&m, w)) {
-        stop_scroll(&m); prop(w, TOUCH, 1);
+        stop_scroll(&m);
+        prop(w, TOUCH, 1);
         widget_invalidate_force(w, (void *)0);
     }
     return result; /* The very same touch continues through the stock tap/drag handlers. */
@@ -251,7 +280,9 @@ int ringnav_dispatch(void *target, void *event) {
         if (w && load(&m, w)) {
             for (int i = 0; i < m.n; ++i) {
                 if (m.at[i] == target) {
-                    prop(w, SEL, m.id[i]); widget_invalidate_force(w, (void *)0); break;
+                    prop(w, SEL, m.id[i]);
+                    widget_invalidate_force(w, (void *)0);
+                    break;
                 }
             }
         }
@@ -266,8 +297,9 @@ int ringnav(void *ctx, void *event) {
     if (key != KEY_CENTER && key != KEY_PREV && key != KEY_NEXT) return result;
     if (!usable()) return result;
     /* Match the stock power-key release exclusions, including release after long press. */
-    if (key == KEY_CENTER && (g_power_longkey || g_ingore_bootkey_flag ||
-        *(volatile unsigned char *)0xa37c8a)) return result;
+    if (key == KEY_CENTER &&
+        (g_power_longkey || g_ingore_bootkey_flag || *(volatile unsigned char *)0xa37c8a))
+        return result;
     void *wm = window_manager(), *top = window_manager_get_top_window(wm);
     if (!top || !allowed(widget_get_prop_str(top, "name", (void *)0))) return result;
     if (window_manager_is_animating(wm) || window_manager_get_pointer_pressed(wm)) return STOP;
@@ -288,28 +320,43 @@ int ringnav(void *ctx, void *event) {
     }
     prop(w, TOUCH, 0);
     if (m.kind == 3) {
-        if (dir > 0) slide_menu_scroll_to_next(w); else slide_menu_scroll_to_prev(w);
+        if (dir > 0)
+            slide_menu_scroll_to_next(w);
+        else
+            slide_menu_scroll_to_prev(w);
     } else if (m.n) {
         int id = widget_get_prop_int(w, SEL, -1);
         int next = id < 0 ? (cur >= 0 ? m.id[cur] : 0) : id + dir;
         if (next < 0 || next >= m.rows) return STOP;
         int y, h;
-        if (m.kind == 2) { y = next * m.row; h = m.row; }
-        else { rect_t r = bounds(&m, next); y = r.y + m.top; h = r.h; }
+        if (m.kind == 2) {
+            y = next * m.row;
+            h = m.row;
+        } else {
+            rect_t r = bounds(&m, next);
+            y = r.y + m.top;
+            h = r.h;
+        }
         int want = y < m.top ? y : y + h > m.top + m.height ? y + h - m.height : m.top;
         want = clamp_step(want, (m.kind == 2 ? m.rows * m.row : I(w, 0x7c)) - m.height, 0);
         prop(w, SEL, next);
         /* Reversing into the current viewport must cancel the previous glide away from it. */
         if (want == m.top && moving(&m)) stop_scroll(&m);
         if (want != m.top) {
-            if (m.kind == 2) { stop_scroll(&m); table_client_set_yoffset(w, want); }
-            else scroll_view_scroll_delta_to(w, 0, want - m.top, GLIDE_MS);
+            if (m.kind == 2) {
+                stop_scroll(&m);
+                table_client_set_yoffset(w, want);
+            } else
+                scroll_view_scroll_delta_to(w, 0, want - m.top, GLIDE_MS);
         }
     } else {
         int max = (m.kind == 2 ? m.rows * m.row : I(w, 0x7c)) - m.height;
         int next = clamp_step(m.top, max, dir * RING_STEP);
-        if (m.kind == 2) { stop_scroll(&m); table_client_set_yoffset(w, next); }
-        else if (next != m.top) scroll_view_scroll_delta_to(w, 0, next - m.top, GLIDE_MS);
+        if (m.kind == 2) {
+            stop_scroll(&m);
+            table_client_set_yoffset(w, next);
+        } else if (next != m.top)
+            scroll_view_scroll_delta_to(w, 0, next - m.top, GLIDE_MS);
     }
     widget_invalidate_force(w, (void *)0);
     return STOP;

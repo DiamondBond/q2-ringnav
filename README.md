@@ -47,12 +47,12 @@ Four checked MIPS prologues redirect into a read/execute payload at `0xb00000`, 
 unused `PT_NULL` program header. Trampolines restore the stock GOT base and resume each original
 function after its PIC setup:
 
-| Stock callback | Address | Purpose |
-|---|---|---|
-| `on_wm_keyup_before_fun` | `0x4e85c8` | Stock lock filter first, then wheel/centre navigation |
-| `on_wm_tsdown_before_fun` | `0x4e8bd0` | Preserve stock touch processing and interrupt wheel glide |
-| `widget_on_paint_border` | `0x6596a0` | Draw the selected entry outline after native children |
-| `widget_dispatch` | `0x65e0ec` | Observe a native click before its app callback changes the UI |
+| Stock callback            | Address    | Purpose                                                       |
+| ------------------------- | ---------- | ------------------------------------------------------------- |
+| `on_wm_keyup_before_fun`  | `0x4e85c8` | Stock lock filter first, then wheel/centre navigation         |
+| `on_wm_tsdown_before_fun` | `0x4e8bd0` | Preserve stock touch processing and interrupt wheel glide     |
+| `widget_on_paint_border`  | `0x6596a0` | Draw the selected entry outline after native children         |
+| `widget_dispatch`         | `0x65e0ec` | Observe a native click before its app callback changes the UI |
 
 Selection is stored in widget-owned integer properties on the navigation surface, independently
 of AWTK's focused flag. The outline and centre action resolve that same logical selection against
