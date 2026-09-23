@@ -273,7 +273,7 @@ class Machine:
     def bind(self,rows,offset=0):
         """Reindex a recycled row pool the way the stock table rebind does."""
         for j,r in enumerate(rows):
-            self.word(r+O['ROW_INDEX'],offset//48+j); self.word(r+O['W_Y'],offset+j*48)
+            self.word(r+O['ROW_INDEX'],offset//48+j); self.word(r+O['W_Y'],(offset//48+j)*48)
     def table_page(self,n=4):
         """A table_client page of n recycled rows; returns (surface, row widgets, entries)."""
         w=self.page('allmusic_page','table_client')
@@ -362,8 +362,8 @@ assert [c[0] for c in m.calls if c[0].startswith('canvas_')][-6:]==[
     'canvas_fill_rounded_rect','canvas_stroke_rounded_rect','canvas_stroke_rounded_rect',
     'canvas_set_fill_color','canvas_set_stroke_color','canvas_set_clip_rect']; passed()
 assert m.confirm()==11 and m.dispatched()[0][1]==entries[0]; passed()
-assert m.call()==11 and m.selected(w)==1 and not m.moved()
-assert m.call()==11 and m.selected(w)==2 and m.get(w+O['SCROLL_Y'])==48
+assert m.call()==11 and m.selected(w)==1 and m.get(w+O['SCROLL_Y'])==12
+assert m.call()==11 and m.selected(w)==2 and m.get(w+O['SCROLL_Y'])==60
 assert m.confirm()==11 and m.dispatched()[0][1]==entries[2]; passed()
 # The separate Play/Pause key remains native even with an active selection.
 assert m.call(O['KEY_PLAY'])==0 and not m.dispatched(); passed()
@@ -404,7 +404,7 @@ m=Machine(); w,rows,entries=m.table_page()
 m.rebind=lambda a,offset: m.bind(rows,offset); m.bind(rows)
 m.paint(w); assert m.selected(w)==0
 assert m.call()==11 and m.selected(w)==1
-assert m.call()==11 and m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==48
+assert m.call()==11 and m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==60
 assert m.moved()[-1][0]=='table_client_scroll_to'
 assert m.confirm()==11 and m.dispatched()[0][1]==entries[1]; passed()
 # A touch click in a rebound row immediately changes what centre opens.
@@ -424,10 +424,10 @@ assert m.selected(w)==0; passed()
 m=Machine(); w,es=m.page_list(10,extent=1000)
 m.paint(w)
 for _ in range(5): assert m.call()==11
-assert m.selected(w)==5 and m.get(w+O['SCROLL_Y'])==192
+assert m.selected(w)==5 and m.get(w+O['SCROLL_Y'])==204
 w2,es2=m.page_list(10,extent=1000)
-assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+O['SCROLL_Y'])==192
-assert m.rounded[0]['rect']==(1,49,238,46) and m.rounded[0]['kind']=='fill'
+assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+O['SCROLL_Y'])==204
+assert m.rounded[0]['rect']==(1,37,238,46) and m.rounded[0]['kind']=='fill'
 assert m.confirm()==11 and m.dispatched()[0][1]==es2[5]; passed()
 
 # Memory is per audited context: visiting another page leaves it alone.
@@ -447,7 +447,7 @@ m.paint(w); m.touch(); m.word(w+O['SCROLL_Y'],240); m.word(w+O['VIEW_ANIMATOR'],
 m.paint(w); assert m.selected(w)==0
 m.word(w+O['VIEW_ANIMATOR'],0); m.paint(w); assert m.selected(w)==5
 w2,es2=m.page_list(10,extent=1000)
-assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+O['SCROLL_Y'])==192; passed()
+assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+O['SCROLL_Y'])==204; passed()
 
 # Position memory follows row text across a recreation, not just the index.
 m=Machine(); w,es=m.page_list(6,extent=1000)
@@ -571,7 +571,7 @@ for reuse in (False,True):
         m.u.mem_write(syms['g_folder_path'],path.encode()+b'\0')
         if not reuse: w,es=m.page_list(10,name='folder_page')
         m.word(w+O['SCROLL_Y'],0); m.paint(w)
-        assert m.selected(w)==wanted and m.get(w+O['SCROLL_Y'])==(wanted-1)*48
+        assert m.selected(w)==wanted and m.get(w+O['SCROLL_Y'])==(wanted-1)*48+12
     passed()
 
 # Exactly 64 scopes fit. Selection promotes; restoration alone does not change recency.
@@ -655,7 +655,7 @@ for reuse in (False,True):
             m.word(syms[changed],query)
             if not reuse: w,rs,es=m.table_page(n=20)
             m.word(w+O['TABLE_TOP'],0); m.paint(w)
-            assert m.selected(w)==wanted and m.get(w+O['TABLE_TOP'])==(wanted-1)*48
+            assert m.selected(w)==wanted and m.get(w+O['TABLE_TOP'])==(wanted-1)*48+12
         passed()
 # Without an audited content identity, a recreated detail/network page starts fresh.
 for name in ('netdiskfolder_page','tidal_albuminfo_page','playerqueue_page'):
@@ -682,7 +682,7 @@ for _ in range(5): assert m.call()==11
 w2,es2=m.page_list(10,extent=1000)
 m.glide=False
 assert m.call()==11 and m.selected(w2)==6
-assert m.moved()[-1][0]=='scroll_view_scroll_delta_to' and m.moved()[-1][3]==240; passed()
+assert m.moved()[-1][0]=='scroll_view_scroll_delta_to' and m.moved()[-1][3]==252; passed()
 
 # A live list whose row count changes resets the selection without re-reading the table.
 m=Machine(); w,es=m.page_list(10,extent=1000)
@@ -696,10 +696,10 @@ m.paint(w); assert m.selected(w)==0; passed()
 m=Machine(); w,_,entries=m.table_page()
 m.paint(w)
 for _ in range(2): assert m.call()==11
-assert m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==48
+assert m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==60
 m.rebind=None
 w2,_,entries2=m.table_page()
-m.paint(w2); assert m.selected(w2)==2 and m.get(w2+O['TABLE_TOP'])==48
+m.paint(w2); assert m.selected(w2)==2 and m.get(w2+O['TABLE_TOP'])==60
 assert m.confirm()==11 and m.dispatched()[0][1]==entries2[2]; passed()
 
 # Table recall survives interruption even when the target is outside the recycled row pool.
@@ -708,9 +708,9 @@ for wanted in (2,12):
     for _ in range(wanted): m.call()
     w2,rs2,es2=m.table_page(); m.glide=False
     m.touch(); m.paint(w2)
-    assert m.selected(w2)==wanted and m.moved()[-1][2]==(wanted-1)*48
+    assert m.selected(w2)==wanted and m.moved()[-1][2]==(wanted-1)*48+12
     # Rebind the pool as the restarted glide completes.
-    top=(wanted-1)*48
+    top=(wanted-1)*48+12
     m.word(w2+O['TABLE_TOP'],top); m.word(w2+O['TABLE_ANIMATOR'],0)
     m.bind(rs2,top)
     m.paint(w2); assert m.selected(w2)==wanted
@@ -814,15 +814,35 @@ m.advance(1000); assert not m.clicks and not m.screens and not m.timers; passed(
 m=Machine(); m.page()
 assert m.release()==11 and m.release(100)==11
 assert not m.timers and not m.clicks and not m.screens; passed()
-# Home accepts at 0 and 200ms; dropped detents/reversals do not move the deadline.
+# Home accepts at 0 and 200ms; dropped same-direction detents do not move the deadline.
 for first in (O['KEY_NEXT'],O['KEY_PREV']):
     m=Machine(); m.now=0; w=m.page('home_page','slide_menu')
     assert m.call(first,gap=0)==11 and len(m.moved())==1
-    assert m.call(O['KEY_PREV'],gap=100)==11 and not m.moved()
-    assert m.call(O['KEY_NEXT'],gap=99)==11 and not m.moved()
+    assert m.call(first,gap=100)==11 and not m.moved()
+    assert m.call(first,gap=99)==11 and not m.moved()
     assert m.call(first,gap=1)==11 and len(m.moved())==1
     assert m.call(first,gap=199)==11 and not m.moved()
     assert m.call(first,gap=1)==11 and len(m.moved())==1; passed()
+# Reversals are immediate and start a fresh same-direction interval, including clock wrap.
+for start in (0,0xfffffff0):
+    for first,reverse in ((O['KEY_NEXT'],O['KEY_PREV']),(O['KEY_PREV'],O['KEY_NEXT'])):
+        m=Machine(); m.now=start; m.page('home_page','slide_menu')
+        assert m.call(first,gap=0)==11 and len(m.moved())==1
+        assert m.call(reverse,gap=100)==11 and len(m.moved())==1
+        assert m.moved()[0][0]==('slide_menu_scroll_to_next' if reverse==O['KEY_NEXT'] else 'slide_menu_scroll_to_prev')
+        assert m.call(reverse,gap=100)==11 and not m.moved()
+        assert m.call(reverse,gap=99)==11 and not m.moved()
+        assert m.call(reverse,gap=1)==11 and len(m.moved())==1
+        assert m.call(first,gap=1)==11 and len(m.moved())==1; passed()
+# A rejected reversal cannot change the accepted direction or deadline.
+for blocked in ('debounce','animating'):
+    m=Machine(); m.now=0; m.page('home_page','slide_menu'); m.call(gap=0)
+    if blocked=='debounce': m.byte(0xa37c89,1)
+    else: m.animating=1
+    assert m.call(O['KEY_PREV'],gap=50,debounce=True)==11 and not m.moved()
+    m.animating=0
+    assert m.call(gap=149)==11 and not m.moved()
+    assert m.call(gap=1)==11 and len(m.moved())==1; passed()
 # Events rejected by stock debounce or UI animation do not reset/extend the home gate.
 for blocked in ('debounce','animating'):
     m=Machine(); m.now=0; m.page('home_page','slide_menu')
@@ -1003,7 +1023,8 @@ m.paint(w); assert m.selected(w)==2
 assert m.confirm()==11 and m.dispatched()[0][1]==es[2]
 m.call(); assert m.selected(w)==3
 m.call(O['KEY_PREV']); assert m.selected(w)==2
-m.call(O['KEY_PREV']); assert m.selected(w)==1 and m.get(w+O['VIEW_ANIMATOR'])==0; passed()
+m.call(O['KEY_PREV']); assert m.selected(w)==1 and m.moved()[-1][3]==12
+m.call(O['KEY_PREV']); assert m.selected(w)==0 and m.get(w+O['VIEW_ANIMATOR'])==0; passed()
 # Empty menus never activate or turn off the screen; touch doesn't swallow its first event.
 m=Machine(); w=m.page(); assert m.confirm()==11 and not m.dispatched()
 assert m.touch()==0 and not m.dispatched(); passed()
@@ -1013,6 +1034,27 @@ e=m.entry(w); m.word(e+O['W_H'],140); m.nodes[w]['children']=[e]
 m.paint(w)
 assert m.selected(w)==0 and [r['kind'] for r in m.rounded]==['fill','stroke','stroke']
 assert m.rounded[0]['rect']==(1,1,238,138) and all(r['clip']==(0,0,240,96) for r in m.rounded); passed()
+# Both list kinds leave breathing room, shrink it in tight viewports, and clamp at either end.
+for virtual in (False,True):
+    for height,margin in ((96,12),(60,6),(49,0),(48,0),(40,0)):
+        m=Machine()
+        if virtual:
+            w,rs,es=m.table_page(n=10); m.word(w+O['TABLE_ROWS'],10)
+            off=O['TABLE_TOP']; m.rebind=lambda a,offset: m.bind(rs,offset)
+        else:
+            w,es=m.page_list(10,extent=480); off=O['SCROLL_Y']
+        m.word(w+O['W_H'],height); m.paint(w)
+        assert m.get(w+off)==0 and not m.moved()
+        for _ in range(3): m.call()
+        assert m.selected(w)==3
+        assert m.get(w+off)==(144 if height<48 else 192-height+margin)
+        m.call(O['KEY_PREV'])
+        assert m.selected(w)==2 and m.get(w+off)==96-margin
+        m.call(O['KEY_PREV']); m.call(O['KEY_PREV'])
+        assert m.selected(w)==0 and m.get(w+off)==0
+        for _ in range(9): m.call()
+        assert m.selected(w)==9 and m.get(w+off)==(432 if height<48 else 480-height)
+        m.paint(w); assert not m.moved(); passed()
 # Entering a tall row from either direction reveals its title, including after recreation.
 m=Machine(); w,es=m.page_list(3,height=96,extent=400)
 m.word(es[1]+O['W_H'],140); m.word(es[2]+O['W_Y'],188)

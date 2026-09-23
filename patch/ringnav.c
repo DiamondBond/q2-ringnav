@@ -3,6 +3,7 @@
 #include "stock.h"
 #define STOP 11
 #define GLIDE_MS 300
+#define SCROLL_MARGIN 12
 #define DOUBLE_CLICK_MS 300
 #define HOME_WHEEL_MS 200
 #define ACCEL_MS 140
@@ -35,6 +36,7 @@ typedef struct {
     unsigned center_timer, center_token, center_scope, center_hash, center_hash2;
     int center_id, center_ctx, center_rows;
     unsigned last_home;
+    int home_dir;
     void *home_surface;   /* non-null also marks a step accepted at time zero */
     void *center_top;     /* top window of that press */
     void *center_surface; /* navigation surface of that press */
@@ -490,7 +492,7 @@ static void stop_scroll(menu_t *m) {
     }
 }
 
-/* Least viewport move that makes logical row id fully visible; no animator if already visible.
+/* Least viewport move that reveals logical row id with a small reading margin.
  * cancel stops a glide away from the live viewport, for a wheel reversal into it. */
 static void reveal(menu_t *m, int id, int cancel) {
     int top = view_top(m);
@@ -506,7 +508,10 @@ static void reveal(menu_t *m, int id, int cancel) {
         h = r.h;
     }
     /* A tall row cannot fit: show its title consistently instead of alternating edges. */
-    int want = h > m->height || y < top ? y : y + h > top + m->height ? y + h - m->height : top;
+    int margin = clamp_step((m->height - h) / 2, SCROLL_MARGIN, 0);
+    int want = h > m->height || y - top < margin  ? y - margin
+               : y - top > m->height - h - margin ? y - (m->height - h - margin)
+                                                  : top;
     want = clamp_step(want, max_top(m), 0);
     if (want == top) {
         if (cancel && moving(m)) stop_scroll(m);
@@ -811,9 +816,11 @@ int ringnav(void *ctx, void *event) {
     }
     prop(w, TOUCH, 0);
     if (is_home(top, w)) {
-        if (st.home_surface == w && now - st.last_home < HOME_WHEEL_MS) return STOP;
+        if (st.home_surface == w && st.home_dir == dir && now - st.last_home < HOME_WHEEL_MS)
+            return STOP;
         st.home_surface = w;
         st.last_home = now;
+        st.home_dir = dir;
     }
     int step = wheel_step(&g_menu, top, dir, now);
     if (g_menu.kind == 3) {
