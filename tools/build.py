@@ -7,7 +7,7 @@ import argparse, hashlib, io, json, pathlib, re, struct, subprocess, tarfile, zi
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ZIP_SHA = '154c17822d09be001be35c03d2d3488424dee195221790bd70864480d55b0f00'
 DEMO_SHA = '2c5f06142850b4fc168f82b44a81550cce0a5b4b9fe1c179dced4a08a3049138'
-VERSION = 'V1.9R'
+VERSION = 'V2.0R'
 BASE = 0xb00000
 SCRATCH = 0xb0f000
 RING_STEP = 48

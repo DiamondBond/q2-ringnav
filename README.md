@@ -4,7 +4,7 @@ Firmware mod for the Shanling Q2 that lets you use the scroll wheel to move thro
 
 The touchscreen still works normally. Outside supported menus, the wheel still controls volume.
 
-**Latest firmware: V1.9R**
+**Latest firmware: V2.0R**
 
 [**Download the latest release**](https://github.com/DiamondBond/q2-ringnav/releases/latest)
 
@@ -16,7 +16,7 @@ Make sure the Q2 is charged before updating, and don't remove the microSD card w
 2. Unzip it and copy `update.tar` to the root of your microSD card.
 3. On the Q2, go to **System settings → System Update → TF card update**.
 4. Confirm the update and wait for the player to restart.
-5. Check **About** and make sure it shows `V1.9R`.
+5. Check **About** and make sure it shows `V2.0R`.
 
 To restore stock firmware via the UI; flash the [Shanling Q2 official firmware](https://en.shanling.com/download/150) through **System settings → System Update → TF card update**.
 
@@ -45,6 +45,7 @@ If you find a menu where something behaves strangely, please open an issue and s
 
 ## Changelog
 
+- **V2.0R**: Centre presses now confirm after 300 ms, allowing a second press within that window to turn the screen off. Home carousel wheel input is paced to make cards easier to select. Includes an orientation fixed boot logo.
 - **V1.9R**: The selection outline is now one crisp white line over a dark separator and the subtle dark fill, so it stays readable over bright album art. A canvas that declines rounded drawing keeps the square outline.
 - **V1.8R**: Wheel acceleration, gliding music tables, a scoped double-press screen toggle, nested tap-target selection, per-context position memory with row-text identity, multi-pane surface selection, a centre-nearest swipe settle and a build-time context audit.
 - **V1.7R**: Added centre button double-press to toggle the screen on/off.
