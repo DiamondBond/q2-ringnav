@@ -8,6 +8,7 @@
 #define ACCEL_MS 140
 #define ACCEL_DIV 3
 #define ACCEL_MAX 8
+#define SHORT_LIST_MAX 16
 #define MAX_ENTRIES 512
 #define POS_MEM 64
 /* RADIUS, FILL_RGB, FILL_ALPHA and SHADE_ALPHA come from offsets.inc; the colors pack their bytes
@@ -19,6 +20,11 @@
 #define I(p, o) (*(int *)((char *)(p) + (o)))
 #define P(p, o) (*(void **)((char *)(p) + (o)))
 #define B(p, o) (*(unsigned char *)((char *)(p) + (o)))
+
+typedef struct {
+    int ctx, id; /* logical row + 1; 0 = unused */
+    unsigned scope, hash, hash2;
+} position_t;
 
 /* Writable state lives in the zero-filled page the builder maps past the payload text.
  * center_timer defers confirmation; wheel_* scale repeated fast detents; pos_* remember
@@ -37,12 +43,9 @@ typedef struct {
     unsigned wheel_run;   /* consecutive fast detents in that direction */
     void *wheel_top, *wheel_surface;
     unsigned wheel_scope;
-    int pos_id[POS_MEM];         /* last selected logical row + 1 per audited context; 0 = unused */
-    unsigned pos_hash[POS_MEM];  /* hash of the row's first text; 0 when the row has none */
-    unsigned pos_hash2[POS_MEM]; /* hash of its second text; 0 when the row has only one */
-    unsigned pos_scope[POS_MEM]; /* browsing identity, never shared by unrelated lists */
-    void *reveal_surface;        /* surface of the interrupted recall glide, 0 when none */
-    int reveal_id;               /* logical row that glide was bringing into view */
+    position_t pos[POS_MEM]; /* most recently selected first; keyed by context and scope */
+    void *reveal_surface;    /* surface of the interrupted recall glide, 0 when none */
+    int reveal_id;           /* logical row that glide was bringing into view */
 } scratch_t;
 static scratch_t st __attribute__((section(".scratch")));
 
@@ -121,6 +124,10 @@ static int clamp_step(int offset, int maximum, int delta) {
  * starts over. Stock rate-limits wheel keys to roughly one per 80-200 ms, so real ticks
  * land inside the acceleration window. */
 static int wheel_step(menu_t *m, void *top, int dir, unsigned now) {
+    if (m->rows <= SHORT_LIST_MAX) {
+        st.wheel_run = 0;
+        return 1;
+    }
     if (st.wheel_run && now - st.last_wheel <= ACCEL_MS && st.wheel_dir == dir &&
         st.wheel_top == top && st.wheel_surface == m->w && st.wheel_scope == m->scope)
         st.wheel_run += st.wheel_run < 3 * ACCEL_DIV;
@@ -274,8 +281,7 @@ static row_id_t row_id(void *w) {
 
 /* The local list loaders use these browsing globals: folder_enter/back maintain g_folder_path;
  * load_localclass_list/load_album_detaillist use the class, saved query and artist/album modes.
- * Hash the bounded query object, including its flags, rather than a title or a freed pointer.
- * ponytail: one remembered content scope per window type; a history cache can follow if needed. */
+ * Hash the bounded query object, including its flags, rather than a title or a freed pointer. */
 static int context_now(unsigned *scope) {
     void *top = window_manager_get_top_window(window_manager());
     const char *name = top ? widget_get_prop_str(top, "name", (void *)0) : (void *)0;
@@ -310,6 +316,14 @@ static int context_now(unsigned *scope) {
 static int index_of(menu_t *m, int id);
 static void reveal(menu_t *m, int id, int cancel);
 
+/* Bounded recency order avoids a timestamp that could wrap during a long session. */
+static int position(menu_t *m) {
+    if (m->ctx >= 0)
+        for (int i = 0; i < POS_MEM; ++i)
+            if (st.pos[i].id && st.pos[i].ctx == m->ctx && st.pos[i].scope == m->scope) return i;
+    return -1;
+}
+
 /* Remember where the user was. Widget props die with a recreated page; this survives it.
  * Non-virtual lists also remember the row's first two text values, so a reordered list restores
  * the same item and duplicate names can be told apart by their second line. */
@@ -327,11 +341,17 @@ static void select(menu_t *m, int id) {
                 hash2 = r.two;
             }
         }
-        if (ctx >= 0 && ctx < POS_MEM) {
-            st.pos_id[ctx] = id + 1;
-            st.pos_hash[ctx] = hash;
-            st.pos_hash2[ctx] = hash2;
-            st.pos_scope[ctx] = m->scope;
+        if (ctx >= 0) {
+            int p = position(m);
+            if (p < 0) p = POS_MEM - 1;
+            for (; p > 0; --p) {
+                st.pos[p].ctx = st.pos[p - 1].ctx;
+                st.pos[p].id = st.pos[p - 1].id;
+                st.pos[p].scope = st.pos[p - 1].scope;
+                st.pos[p].hash = st.pos[p - 1].hash;
+                st.pos[p].hash2 = st.pos[p - 1].hash2;
+            }
+            st.pos[0] = (position_t){ ctx, id + 1, m->scope, hash, hash2 };
         }
     }
     prop(m->w, SEL, id);
@@ -391,11 +411,10 @@ static int load(menu_t *m, void *w) {
      * remembered first text, breaks ties by the second text and then by the remembered index,
      * and falls back to the index when no text matches. */
     if (m->kind != 3 && count < 0) {
-        int ctx = m->ctx;
-        if (ctx < 0 || ctx >= POS_MEM || st.pos_scope[ctx] != m->scope) ctx = -1;
-        int id = ctx < 0 ? -1 : st.pos_id[ctx] - 1;
-        unsigned hash = ctx < 0 ? 0 : st.pos_hash[ctx];
-        unsigned hash2 = ctx < 0 ? 0 : st.pos_hash2[ctx];
+        int p = position(m);
+        int id = p < 0 ? -1 : st.pos[p].id - 1;
+        unsigned hash = p < 0 ? 0 : st.pos[p].hash;
+        unsigned hash2 = p < 0 ? 0 : st.pos[p].hash2;
         if (id >= 0 && m->kind == 1 && hash) {
             /* A secondary-text match outranks proximity; equal ranks keep the earlier row. */
             int best = -1, best_dist = 0, best_second = 0;

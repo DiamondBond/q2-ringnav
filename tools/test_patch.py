@@ -559,6 +559,72 @@ m.paint(w3); assert m.selected(w3)==0
 for _ in range(3): m.call()
 m.u.mem_write(syms['g_folder_path'],b'/sd/Folder C\0')
 m.word(w3+O['SCROLL_Y'],0); m.paint(w3); assert m.selected(w3)==0; passed()
+# Nested folder returns restore each level on recreated or rebound surfaces.
+for reuse in (False,True):
+    m=Machine(); w,es=m.page_list(10,name='folder_page')
+    for path,wanted in (('/sd',6),('/sd/child',4),('/sd/child/grandchild',2)):
+        m.u.mem_write(syms['g_folder_path'],path.encode()+b'\0')
+        if not reuse: w,es=m.page_list(10,name='folder_page')
+        m.word(w+O['SCROLL_Y'],0); m.paint(w); assert m.selected(w)==0
+        for _ in range(wanted): m.call()
+    for path,wanted in (('/sd/child',4),('/sd',6),('/sd/child/grandchild',2)):
+        m.u.mem_write(syms['g_folder_path'],path.encode()+b'\0')
+        if not reuse: w,es=m.page_list(10,name='folder_page')
+        m.word(w+O['SCROLL_Y'],0); m.paint(w)
+        assert m.selected(w)==wanted and m.get(w+O['SCROLL_Y'])==(wanted-1)*48
+    passed()
+
+# Exactly 64 scopes fit. Selection promotes; restoration alone does not change recency.
+for promote in (False,True):
+    m=Machine(); w,es=m.page_list(4,name='folder_page')
+    for i in range(64):
+        m.u.mem_write(syms['g_folder_path'],f'/sd/{i}'.encode()+b'\0')
+        m.word(w+O['SCROLL_Y'],0); m.paint(w); m.call(); m.call()
+    m.u.mem_write(syms['g_folder_path'],b'/sd/0\0')
+    m.word(w+O['SCROLL_Y'],0); m.paint(w); assert m.selected(w)==2
+    if promote: m.call()  # update and protect the oldest entry
+    m.u.mem_write(syms['g_folder_path'],b'/sd/64\0')
+    m.word(w+O['SCROLL_Y'],0); m.paint(w); m.call()
+    for i,wanted in ((0,3),(2,2)) if promote else ((1,2),(63,2)):
+        m.u.mem_write(syms['g_folder_path'],f'/sd/{i}'.encode()+b'\0')
+        m.word(w+O['SCROLL_Y'],0); m.paint(w); assert m.selected(w)==wanted
+    evicted=1 if promote else 0
+    m.u.mem_write(syms['g_folder_path'],f'/sd/{evicted}'.encode()+b'\0')
+    m.word(w+O['SCROLL_Y'],0); m.paint(w); assert m.selected(w)==0
+    passed()
+
+# A full history must not add work to steady painting or turns in the current scope.
+costs=[]
+for occupancy in (1,64):
+    m=Machine(); w,es=m.page_list(20,height=192,extent=960,name='folder_page')
+    for i in range(occupancy):
+        m.u.mem_write(syms['g_folder_path'],f'/sd/{i:02}'.encode()+b'\0')
+        m.word(w+O['SCROLL_Y'],0); m.paint(w); m.call()
+    instructions=[0]
+    def count_payload(*args): instructions[0]+=1
+    hook=m.u.hook_add(UC_HOOK_CODE,count_payload,begin=0xb00000,end=0xb0efff)
+    m.paint(w); paint_cost=instructions[0]; instructions[0]=0
+    m.call(); costs.append((paint_cost,instructions[0]))
+    m.u.hook_del(hook)
+assert costs[0]==costs[1],costs
+passed()
+
+# Returning after another scope still applies text matching and stale-index rejection.
+for shortened in (False,True):
+    m=Machine(); m.u.mem_write(syms['g_folder_path'],b'/sd/parent\0')
+    w,es=m.page_list(8,name='folder_page')
+    for i,e in enumerate(es): m.nodes[e]['text']=f'track {i}'
+    m.paint(w)
+    for _ in range(6): m.call()
+    m.u.mem_write(syms['g_folder_path'],b'/sd/child\0')
+    w,es=m.page_list(8,name='folder_page'); m.paint(w); m.call()
+    m.u.mem_write(syms['g_folder_path'],b'/sd/parent\0')
+    w,es=m.page_list(3 if shortened else 8,name='folder_page')
+    for i,e in enumerate(es): m.nodes[e]['text']=f'track {i}'
+    if not shortened: m.nodes[es[3]]['text']='track 6'; m.nodes[es[6]]['text']='other'
+    m.paint(w); assert m.selected(w)==(0 if shortened else 3)
+    passed()
+
 # An unavailable or unterminated path cannot supply a content identity.
 for path in (b'\0',b'x'*1024):
     m=Machine(); m.u.mem_write(syms['g_folder_path'],path)
@@ -576,6 +642,21 @@ for changed in ('g_class_type','g_local_classinfo_save','g_artist_type','album_m
     m.word(syms[changed],m.get(syms[changed])+1)
     m.word(w3+O['TABLE_TOP'],0); m.paint(w3); assert m.selected(w3)==0
     passed()
+# Each query can be revisited, including on a surface reused for other queries.
+for reuse in (False,True):
+    for changed in ('g_class_type','g_local_classinfo_save','g_artist_type','album_modetype'):
+        m=Machine(); w,rs,es=m.table_page(n=20)
+        for query,wanted in ((10,7),(20,4),(30,2)):
+            m.word(syms[changed],query)
+            if not reuse: w,rs,es=m.table_page(n=20)
+            m.word(w+O['TABLE_TOP'],0); m.paint(w); assert m.selected(w)==0
+            for _ in range(wanted): m.call()
+        for query,wanted in ((10,7),(20,4),(30,2)):
+            m.word(syms[changed],query)
+            if not reuse: w,rs,es=m.table_page(n=20)
+            m.word(w+O['TABLE_TOP'],0); m.paint(w)
+            assert m.selected(w)==wanted and m.get(w+O['TABLE_TOP'])==(wanted-1)*48
+        passed()
 # Without an audited content identity, a recreated detail/network page starts fresh.
 for name in ('netdiskfolder_page','tidal_albuminfo_page','playerqueue_page'):
     m=Machine(); w,es=m.page_list(8,name=name); m.paint(w)
@@ -809,6 +890,32 @@ assert m.call(gap=1)==11 and len(m.moved())==1; passed()
 m=Machine(); m.now=0xfffffff0; m.page_list(3)
 assert m.release()==11 and m.release(299)==0
 m.advance(300); assert not m.clicks and m.screens==[0]; passed()
+# Short lists stay precise; virtual tables use total logical rows, not their row pool.
+for table in (False,True):
+    for count in (0,1,16,17):
+        m=Machine()
+        if table:
+            w,rs,es=m.table_page(n=min(count,4)); m.word(w+O['TABLE_ROWS'],count)
+            m.rebind=lambda a,offset: m.bind(rs,offset)
+        else: w,es=m.page_list(count,extent=count*48)
+        m.paint(w)
+        for want in (1,2,4 if count==17 else 3):
+            assert m.call(gap=50)==11 and m.selected(w)==min(want,count-1)
+        if count==16:
+            for want in range(4,16):
+                assert m.call(gap=50)==11 and m.selected(w)==want
+            for want in range(14,-1,-1):
+                assert m.call(O['KEY_PREV'],gap=50)==11 and m.selected(w)==want
+        passed()
+
+# Resizing across the short-list boundary cannot carry a previous fast run with it.
+m=Machine(); w,es=m.page_list(17,height=960,extent=17*48)
+for count in (17,16,17):
+    m.nodes[w]['children']=es[:count]; m.paint(w)
+    for want in (1,2,4 if count==17 else 3):
+        assert m.call(gap=50)==11 and m.selected(w)==want
+passed()
+
 # Fast same-direction detents accelerate; a slow detent or a reversal starts over.
 m=Machine(); w,es=m.page_list(40,extent=40*48)
 m.paint(w)

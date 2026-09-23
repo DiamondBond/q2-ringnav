@@ -4,7 +4,7 @@ Firmware mod for the Shanling Q2 that lets you use the scroll wheel to move thro
 
 The touchscreen still works normally. Outside supported menus, the wheel still controls volume.
 
-**Latest firmware: V2.1R**
+**Latest firmware: V2.2R**
 
 [**Download the latest release**](https://github.com/DiamondBond/q2-ringnav/releases/latest)
 
@@ -16,7 +16,7 @@ Make sure the Q2 is charged before updating, and don't remove the microSD card w
 2. Unzip it and copy `update.tar` to the root of your microSD card.
 3. On the Q2, go to **System settings → System Update → TF card update**.
 4. Confirm the update and wait for the player to restart.
-5. Check **About** and make sure it shows `V2.1R`.
+5. Check **About** and make sure it shows `V2.2R`.
 
 To restore stock firmware via the UI; flash the [Shanling Q2 official firmware](https://en.shanling.com/download/150) through **System settings → System Update → TF card update**.
 
@@ -28,12 +28,12 @@ If the UI is not working, use [Shanling's recovery package](https://drive.google
 
 ## Controls
 
-- Turn the scroll wheel to move through menu items; a fast spin skips further in lists. Home cards move at most once every 200 ms, making them easier to select.
+- Turn the scroll wheel to move through menu items; lists of 16 or fewer items move one row per detent, while a fast spin skips further in longer lists. Home cards move at most once every 200 ms, making them easier to select.
 - Short press the centre button to open the highlighted item after a 300 ms confirmation delay.
 - Double-press the centre button within 300 ms to turn the screen off without opening an item. Touch or wheel input cancels a pending confirmation.
 - Tap and swipe still work normally; tapping a row in another visible pane moves wheel control there.
 - Turning the wheel during a swipe stops the scrolling and takes over again.
-- Returning to the same remembered menu restores your selection. A different folder or local music query starts from its own viewport.
+- Returning to a recently visited folder, album, query or settings menu restores its selection and brings it into view. The 64 most recently selected browsing positions are remembered until power-off; unseen lists start from their own viewport.
 - Recreated non-virtual lists in the same remembered context find the selected row by its text after a re-sort.
 - Swiping a list and letting it settle puts the highlight on the row nearest the middle of the list.
 - Outside supported menus, the wheel goes back to normal volume control.
@@ -45,6 +45,7 @@ If you find a menu where something behaves strangely, please open an issue and s
 
 ## Changelog
 
+- **V2.2R**: Remembers the 64 most recently selected browsing positions, restoring folders and music queries on return. Lists of 16 or fewer items stay at one row per wheel detent, even during quick turns.
 - **V2.1R**: Fast-spin acceleration stays within the current menu and resets after a folder/query change, list resize, interrupted gesture or sleep. Oversized rows reveal their title consistently when selected or restored.
 - **V2.0R**: Centre presses now confirm after 300 ms, allowing a second press within that window to turn the screen off. Home carousel wheel input is paced to make cards easier to select. Includes an orientation fixed boot logo.
 - **V1.9R**: The selection outline is now one crisp white line over a dark separator and the subtle dark fill, so it stays readable over bright album art. A canvas that declines rounded drawing keeps the square outline.
@@ -70,15 +71,15 @@ Four checked MIPS prologues redirect into a payload at `0xb00000`, using the fin
 
 Selection is stored in widget-owned integer properties on the navigation surface, independently of AWTK's focused flag. The outline and centre action resolve that same logical selection against the current entries. Centre dispatches a synchronous native `EVT_CLICK`, so a queued click cannot hit a row rebound between selection and delivery. It never dereferences the target after delivery.
 
-Position memory is indexed by the audited top-window name in `patch/contexts.inc`, with a content fingerprint checked before restoration. Local folders use the full bounded `g_folder_path`; local music lists use the stock browsing class, saved query and artist/album modes (`g_class_type`, `g_local_classinfo_save`, `g_artist_type`, `album_modetype`). These are the inputs used by the stock folder and local-list loaders, not playback metadata. The builder verifies each object's size against the stock ELF. A changed fingerprint resets selection even if a surviving surface has the same row count, while keeping the stock viewport. Only the most recent content scope per window type is remembered. Fixed settings menus can restore by window name alone; multi-pane and other dynamic pages without an audited content identity keep their live widget selection but do not restore across recreation. Memory lasts until power-off.
+Position memory is a bounded 64-entry table keyed by the audited top-window context in `patch/contexts.inc` and a content fingerprint. Selecting a row updates its entry and moves it to the front; a full table evicts the least recently selected entry. Restoration alone does not promote an entry. Local folders use the full bounded `g_folder_path`; local music lists use the stock browsing class, saved query and artist/album modes (`g_class_type`, `g_local_classinfo_save`, `g_artist_type`, `album_modetype`). These are the inputs used by the stock folder and local-list loaders, not playback metadata. The builder verifies each object's size against the stock ELF. A changed fingerprint resets selection even if a surviving surface has the same row count, then restores the matching recent position and reveals it, or keeps the stock viewport if none is remembered. Fixed settings menus can restore by window name alone; multi-pane and other dynamic pages without an audited content identity keep their live widget selection but do not restore across recreation. Memory lasts until power-off, with no filesystem writes. The table occupies 1,280 bytes, just 256 bytes more than the previous per-window arrays. Ordinary paints do not search it; repeated selections in the current scope match its first entry and shift nothing. Lookup and promotion are bounded by `POS_MEM` (64), which can also be tuned at build time.
 
 Non-virtual lists also remember hashes of the selected row's first two text values, read through the stock `widget_get_text` UTF-32 accessor. A matching second text outranks proximity; equal matches choose the occurrence nearest the remembered index. Rows without text fall back to the index within the same content scope. The stock rows expose no stable item id. Both scroll views and virtual music tables protect an interrupted recall glide from silently replacing the remembered selection with a currently visible row. A real tap cancels the glide and selects its target; a wheel detent advances from the remembered logical row. Synchronous table rebinds discard the old row-pool snapshot before resolving the selected entry.
 
-Wheel detents accelerate: consecutive detents at most 140 ms apart in the same direction double the step every third detent, up to eight entries. A pause, a reversal, a touch or a centre press starts the count over. Acceleration belongs to the current window, pane and browsing scope; a list resize or rejected navigation input also resets it. Music tables glide with the stock `table_client_scroll_to` animator instead of jumping, so both list kinds settle the same way. Rows taller than the viewport align their top edge when selected or restored, keeping their title visible.
+Lists with at most `SHORT_LIST_MAX` (16) logical entries always move one row per detent. This named constant in `patch/ringnav.c` can be tuned for the hardware; virtual tables use their total logical count, not the recycled row pool size. Longer lists accelerate: consecutive detents at most 140 ms apart in the same direction double the step every third detent, up to eight entries. A pause, a reversal, a touch or a centre press starts the count over. Acceleration belongs to the current window, pane and browsing scope; a list resize or rejected navigation input also resets it. Music tables glide with the stock `table_client_scroll_to` animator instead of jumping, so both list kinds settle the same way. Rows taller than the viewport align their top edge when selected or restored, keeping their title visible.
 
 A centre release arms a stock UI timer for `DOUBLE_CLICK_MS` (300 ms). A second release before expiry on the same live selection cancels confirmation and passes through the stock downstream key-up handler to turn the screen off. A single release dispatches exactly one synchronous click at expiry. Touch, wheel input and invalid navigation state cancel pending confirmation. The timer resolves the target from the live menu and requires the original window, surface, content scope, logical selection, row count and row-text identity to match. Widget-owned tokens also reject reused window/surface addresses. No delayed row pointer is retained; pending state clears before dispatch. Timer allocation failure consumes the press without activating anything.
 
-The home carousel uses `HOME_WHEEL_MS` (200 ms) between accepted wheel steps in either direction. The first step is immediate; intermediate events are consumed without queuing or extending the interval. Touch, centre press and leaving home reset the interval. List acceleration is unchanged. Both timing constants are in `patch/ringnav.c` for hardware tuning. Writable input and position state is mapped at `0xb0f000`.
+The home carousel uses `HOME_WHEEL_MS` (200 ms) between accepted wheel steps in either direction. The first step is immediate; intermediate events are consumed without queuing or extending the interval. Touch, centre press and leaving home reset the interval. Both timing constants are in `patch/ringnav.c` for hardware tuning. Writable input and position state is mapped at `0xb0f000`.
 
 A native click chooses its pane from the actual target before walking up to the nearest collected ancestor. A successful selection clears the other pane’s selection and invalidates both panes, so the outline, wheel and centre follow the row that owns the tap. Hidden, disabled and inactive-page panes remain excluded.
 
@@ -107,7 +108,7 @@ python3 tools/test_patch.py /tmp/q2-build  # requires unicorn==2.1.4
 
 The suite executes the actual patched MIPS payload and stock key/touch filters. UI services are mocked; separate scenarios execute the stock canvas clip/color/rectangle code and the stock rounded fill/stroke entry points down to mocked LCD and vgcanvas sinks.
 
-Checks cover touch reselection, gesture suppression, momentum handoff, interrupted and reversed wheel glides, acceleration steps and resets, recycled rows, menu return, count changes, empty/oversized rows, per-context position memory, re-sorted lists, duplicate-text rows through the real stock UTF-32 accessor, stale remembered rows, folder/query scope changes, interrupted table and scroll-view restore glides, touch-driven multi-pane ownership, centre-nearest swipe settle, preserved Play/Pause, power-release exclusions, deterministic confirmation timers, deadline boundaries, cancellation, allocation failure, changed/recycled targets, the real stock downstream screen-off/wake handler and home wheel interval/reset boundaries, nested tap targets and stock key-lock parity. The outline checks cover draw order, rectangle and radius arguments, the separator and white line colors, clip intersection, state restore (including unusual saved colors and untouched alpha bytes) and the square fallback for small rows and for a backend that declines the rounded stroke. Every call checks preserved registers/stack, and native calls check the PIC `$t9` convention.
+Checks cover touch reselection, gesture suppression, momentum handoff, interrupted and reversed wheel glides, acceleration steps and resets, recycled rows, menu return, count changes, empty/oversized rows, 64-entry recent-position eviction and selection recency, nested folder and query returns on recreated/reused surfaces, 0/1/16/17-entry fast turns, re-sorted lists, duplicate-text rows through the real stock UTF-32 accessor, stale remembered rows, folder/query scope changes, interrupted table and scroll-view restore glides, touch-driven multi-pane ownership, centre-nearest swipe settle, preserved Play/Pause, power-release exclusions, deterministic confirmation timers, deadline boundaries, cancellation, allocation failure, changed/recycled targets, the real stock downstream screen-off/wake handler and home wheel interval/reset boundaries, nested tap targets and stock key-lock parity. The outline checks cover draw order, rectangle and radius arguments, the separator and white line colors, clip intersection, state restore (including unusual saved colors and untouched alpha bytes) and the square fallback for small rows and for a backend that declines the rounded stroke. Every call checks preserved registers/stack, and native calls check the PIC `$t9` convention.
 
 The CPU-LCD fill path runs end to end down to mocked LCD sinks, including radius clamping, the `radius <= 2` decline and allocation balance. The stock rounded vgcanvas branch could not be executed end to end under Unicorn 2.1.4: the stock binary is built `-mfp64` and Unicorn's MIPS32 FPU only implements `FR=0`, so its 64-bit conversions trap. The test harness runs the branch up to the first such instruction and asserts the vgcanvas color and line-width calls that precede it.
 
@@ -115,4 +116,8 @@ The builder also rejects any `patch/contexts.inc` name that is not a window name
 
 The test runner refuses a `manifest.json` whose `source_sha256` does not match the current patch sources, so a stale output directory cannot pass as the current build.
 
+A MIPS instruction-count regression check verifies that filling the position table does not increase steady paint or wheel work in the current scope. For the V2.2R 20-row folder fixture, painting executes 3,369 payload instructions (unchanged from V2.1R); a warm wheel turn executes 3,641 versus 3,607 previously. Inserting an unseen scope into a full table adds 2,448 instructions over the previous implementation. These are mocked-service instruction counts, not hardware latency measurements.
+
 Two fresh builds must produce identical `update.tar` files. Packaging verifies MD5 entries, unchanged kernel and rootfs metadata, and a rootfs no larger than stock.
+
+For on-device acceptance, browse parent → child → grandchild folders, return to each selected folder, and check quick turns on short menus. Also revisit albums/queries and confirm their selections remain separate. Emulator checks do not replace this hardware check.
