@@ -10,6 +10,9 @@ B=pathlib.Path(sys.argv[1] if len(sys.argv)>1 else 'build')
 manifest=json.loads((B/'manifest.json').read_text())
 if manifest.get('source_sha256') != source_sha256():
     raise SystemExit(f'{B}/manifest.json does not match the current patch sources; rebuild into a fresh directory and pass it here')
+readme=(ROOT/'README.md').read_text()
+if f'**Latest firmware: {manifest["version"]}**' not in readme or f'shows `{manifest["version"]}`' not in readme:
+    raise SystemExit(f'README.md does not present {manifest["version"]} as the current firmware; update the version lines before testing')
 O={m.group(1):int(m.group(2),0) for m in re.finditer(r'^#define\s+(\w+)\s+(0x[0-9A-Fa-f]+|\d+)\b',(ROOT/'patch/offsets.inc').read_text(),re.M)}
 syms=symbols(B/'stock-demo')
 VG_MOCKS=[n for n in syms if n.startswith(('vgcanvas_','vg_gradient_'))]

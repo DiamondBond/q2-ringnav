@@ -95,7 +95,7 @@ Rebuilt firmware uses `assets/logo.jpg` as the boot splash by default. Pass anot
 
 ## Build and validation
 
-Requires clang/lld/llvm-objcopy, squashfs-tools 4.7 (tested 4.7.5), and the original ZIP:
+Requires clang/lld/llvm-objcopy, squashfs-tools 4.7 (tested 4.7.5), the test harness dependencies in `requirements.txt`, and the original ZIP:
 
 ```text
 154c17822d09be001be35c03d2d3488424dee195221790bd70864480d55b0f00
@@ -105,7 +105,7 @@ SHA-256 of the stock Shanling Q2 V1.32 firmware ZIP.
 
 ```sh
 python3 tools/build.py 'Q2 Firmware V1.32.zip' --out /tmp/q2-build
-python3 tools/test_patch.py /tmp/q2-build  # requires unicorn==2.1.4
+python3 tools/test_patch.py /tmp/q2-build  # after: pip install -r requirements.txt
 ```
 
 The suite executes the actual patched MIPS payload and stock key/touch filters. UI services are mocked; separate scenarios execute the stock canvas clip/color/rectangle code and the stock rounded fill/stroke entry points down to mocked LCD and vgcanvas sinks.

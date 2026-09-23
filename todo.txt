@@ -1,0 +1,18 @@
+Wheel navigation in the search result dialogs (to be implemented)
+-------------------------------------------------------------------
+The only remaining reachable list surfaces where the wheel falls back to
+volume are the local/online search dialog and the Tidal search dialog.
+
+- Add to patch/contexts.inc as dynamic contexts (a new query is new content,
+  so no position restore):
+    { "search_dialog", CTX_DYNAMIC },
+    { "tidal_search_dialog", CTX_DYNAMIC },
+- Do NOT add "searchbox_dialog": it has no navigable pane, and allowlisting a
+  pane-less window makes the wheel get consumed instead of changing volume.
+- Tests: a wheel/centre scenario on a page named "search_dialog", plus both
+  names in the dynamic (fresh-start) scenarios in tools/test_patch.py.
+- Device check: each dialog is one outer scroll view that also holds the tab
+  buttons, so the first detent may land on the Track/Artist/Album/Genre row
+  before the results. If that feels wrong on hardware, refine surface_under to
+  prefer a pane that has entries when neither pane owns the selection.
+- On release: changelog entry for the new version.
