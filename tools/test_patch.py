@@ -53,6 +53,8 @@ class Machine:
         self.rounded_fail=False
         self.allocs={}
         self.rebind=None; self.on_click=None; self.glide=True
+        self.timers={}; self.next_timer=1; self.timer_fail=False; self.clicks=[]
+        self.screens=[]
         self.canvas=0x1000200; self.lcd=0x1000300; self.now=1000
         self.word(self.canvas+O['CANVAS_LCD'],self.lcd)
         self.word(self.lcd+O['LCD_FILL_COLOR'],0x9abcdef0)
@@ -64,6 +66,8 @@ class Machine:
             for name in ('paint','dispatch'):
                 self.handlers[int(manifest['patch_symbols']['stock_'+name+'_trampoline'],16)]='stock_'+name
         self.handlers[syms['reset_poweroptions_timer']]='reset_poweroptions_timer'
+        for n in ('screen_action','enable_fb','usleep@GLIBC_2.0','airplayGetFlag','playpause_quick_click'):
+            self.handlers[syms[n]]=n
         self.handlers[syms['memcpy@GLIBC_2.0']]='memcpy'
         self.handlers[syms['memset@GLIBC_2.0']]='memset'
         self.handlers[syms['canvas_set_global_alpha']]='canvas_set_global_alpha'
@@ -143,9 +147,17 @@ class Machine:
         elif name=='widget_set_prop_int': n[self.text(b)]=signed(c); ret=0
         elif name=='pointer_event_init':
             self.word(a,b); self.word(a+0x10,c); ret=a
-        elif name=='time_now_ms': ret=self.now
+        elif name=='time_now_ms': ret=self.now & 0xffffffff
+        elif name=='timer_add':
+            ret=0 if self.timer_fail else self.next_timer
+            if ret:
+                self.next_timer+=1
+                self.timers[ret]=(self.now+c,a,b)
+        elif name=='timer_remove': self.timers.pop(a,None); ret=0
+        elif name=='screen_action': self.screens.append(a); ret=1
         elif name=='tk_strcmp': ret=0 if a and b and self.text(a)==self.text(b) else -1
         elif name=='stock_dispatch':
+            self.clicks.append(a)
             if self.on_click: self.on_click(a,b)
             ret=0
         elif name=='table_client_stop_animator_scroll': self.word(a+O['TABLE_ANIMATOR'],0); ret=0
@@ -206,11 +218,11 @@ class Machine:
             u.reg_write(r,0xdeadbeef)
         u.reg_write(UC_MIPS_REG_V0,ret&0xffffffff)
         u.reg_write(UC_MIPS_REG_PC,u.reg_read(UC_MIPS_REG_RA))
-    def call(self,key=O['KEY_NEXT'],address=HOOK,args=None,event_type=0x114,gap=1000,stack=()):
+    def call(self,key=O['KEY_NEXT'],address=HOOK,args=None,event_type=0x114,gap=1000,stack=(),clear=True,debounce=False):
         # Independent input steps occur after the stock key debounce timer expires.
-        self.now+=gap
-        self.byte(0xa37c89,0)  # stock key filter latch; reached as 0x7c89(base) in the demo
-        self.calls=[]; self.strokes=[]; self.rounded=[]; self.vg_calls=[]
+        if gap: self.advance(gap,clear=False)
+        if not debounce: self.byte(0xa37c89,0)  # stock key filter latch
+        if clear: self.calls=[]; self.strokes=[]; self.rounded=[]; self.vg_calls=[]
         self.word(self.event+O['EVENT_KEY'],key)
         self.word(self.event+O['EVENT_TYPE'],event_type)
         self.u.reg_write(UC_MIPS_REG_SP,0x7000f000)
@@ -224,6 +236,30 @@ class Machine:
         assert self.u.reg_read(UC_MIPS_REG_SP)==0x7000f000
         assert [self.u.reg_read(r) for r in SAVED]==[0x12340000+i for i in range(len(SAVED))]
         return signed(self.u.reg_read(UC_MIPS_REG_V0))
+    def advance(self,ms,clear=True):
+        """Run due one-shot UI timers deterministically, including the exact deadline."""
+        if clear: self.calls=[]
+        end=self.now+ms
+        while self.timers:
+            tid,(due,callback,ctx)=min(self.timers.items(),key=lambda item:item[1][0])
+            if due>end: break
+            self.now=due
+            del self.timers[tid]
+            info=self.alloc(0x58)
+            self.word(info+0x20,ctx); self.word(info+0x28,tid)
+            assert self.call(address=callback,args=(info,0,0,0),gap=0,clear=False)==0
+        self.now=end
+    def confirm(self):
+        """Single centre release followed by its full confirmation delay."""
+        ret=self.call(O['KEY_CENTER'])
+        self.advance(300,clear=False)
+        return ret
+    def release(self,gap=0):
+        """Execute both the hook and the real stock downstream screen-toggle handler."""
+        ret=self.call(O['KEY_CENTER'],gap=gap)
+        if ret==0:
+            self.call(O['KEY_CENTER'],address=syms['on_wm_keyup_fun'],gap=0,clear=False)
+        return ret
     def page(self,name='sysset_page',t='scroll_view'):
         child=self.node(t)
         self.top=self.node('window',name,[child])
@@ -325,10 +361,10 @@ assert not any(m.get(e+O['W_FOCUS'])&0x80 for e in entries)
 assert [c[0] for c in m.calls if c[0].startswith('canvas_')][-6:]==[
     'canvas_fill_rounded_rect','canvas_stroke_rounded_rect','canvas_stroke_rounded_rect',
     'canvas_set_fill_color','canvas_set_stroke_color','canvas_set_clip_rect']; passed()
-assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==entries[0]; passed()
+assert m.confirm()==11 and m.dispatched()[0][1]==entries[0]; passed()
 assert m.call()==11 and m.selected(w)==1 and not m.moved()
 assert m.call()==11 and m.selected(w)==2 and m.get(w+O['SCROLL_Y'])==48
-assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==entries[2]; passed()
+assert m.confirm()==11 and m.dispatched()[0][1]==entries[2]; passed()
 # The separate Play/Pause key remains native even with an active selection.
 assert m.call(O['KEY_PLAY'])==0 and not m.dispatched(); passed()
 # Touching a different row selects it before the native callback runs; no extra click.
@@ -336,20 +372,20 @@ assert m.touch()==0
 m.on_click=lambda a,b: (None if m.selected(w)==1 else (_ for _ in ()).throw(AssertionError('late selection')))
 assert m.click(entries[1])==0 and len(m.dispatched())==1 and m.selected(w)==1
 m.on_click=None
-assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==entries[1]; passed()
+assert m.confirm()==11 and m.dispatched()[0][1]==entries[1]; passed()
 # Native touch focus may move anywhere without altering the logical selection.
 m.word(entries[4]+O['W_FOCUS'],0x80)
-assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==entries[1]; passed()
+assert m.confirm()==11 and m.dispatched()[0][1]==entries[1]; passed()
 # Swipe preserves selection during momentum; settle adopts the visible row nearest the centre.
 m.touch(); m.word(w+O['SCROLL_Y'],110); m.word(w+O['VIEW_ANIMATOR'],0x1234)
 m.paint(w); assert m.selected(w)==1
 m.word(w+O['VIEW_ANIMATOR'],0); m.paint(w); assert m.selected(w)==3
-assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==entries[3]; passed()
+assert m.confirm()==11 and m.dispatched()[0][1]==entries[3]; passed()
 # Wheel interrupts touch momentum, and centre while a finger is down is consumed without a click.
 m.touch(); m.word(w+O['VIEW_ANIMATOR'],0x1234)
 assert m.call(O['KEY_PREV'])==11 and m.get(w+O['VIEW_ANIMATOR'])==0 and m.selected(w)==2
 m.pressed=1
-assert m.call(O['KEY_CENTER'])==11 and not m.dispatched()
+assert m.confirm()==11 and not m.dispatched()
 assert m.call()==11 and m.selected(w)==2
 m.pressed=0; passed()
 # With three rows in view the difference shows: the middle one wins, not the top edge.
@@ -361,7 +397,7 @@ m.word(w+O['VIEW_ANIMATOR'],0); m.paint(w); assert m.selected(w)==6; passed()
 def destroy(a,b):
     m.nodes.clear(); m.top=0
 m.on_click=destroy
-assert m.call(O['KEY_CENTER'])==11 and len(m.dispatched())==1; passed()
+assert m.confirm()==11 and len(m.dispatched())==1; passed()
 
 # Recycle a small row pool: selection belongs to the logical index, never the widget.
 m=Machine(); w,rows,entries=m.table_page()
@@ -370,16 +406,16 @@ m.paint(w); assert m.selected(w)==0
 assert m.call()==11 and m.selected(w)==1
 assert m.call()==11 and m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==48
 assert m.moved()[-1][0]=='table_client_scroll_to'
-assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==entries[1]; passed()
+assert m.confirm()==11 and m.dispatched()[0][1]==entries[1]; passed()
 # A touch click in a rebound row immediately changes what centre opens.
 m.touch(); m.click(entries[0]); assert m.selected(w)==1
-assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==entries[0]; passed()
+assert m.confirm()==11 and m.dispatched()[0][1]==entries[0]; passed()
 # Swipe out of the old pool, then centre: settle/re-resolve before dispatch.
 m.touch(); m.word(w+O['TABLE_TOP'],480); m.bind(rows,480); m.word(w+O['TABLE_ANIMATOR'],0x9876)
-assert m.call(O['KEY_CENTER'])==11 and m.selected(w)==10 and m.dispatched()[0][1]==entries[0]
+assert m.confirm()==11 and m.selected(w)==10 and m.dispatched()[0][1]==entries[0]
 assert m.get(w+O['TABLE_ANIMATOR'])==0; passed()
 # Returning to a surviving menu keeps a valid selection; shrinking data repairs it.
-oldtop=m.top; m.page('playing_page'); assert m.call(O['KEY_CENTER'])==0
+oldtop=m.top; m.page('playing_page'); assert m.confirm()==0
 m.top=oldtop; m.paint(w); assert m.selected(w)==10
 m.word(w+O['TABLE_ROWS'],1); m.word(w+O['TABLE_TOP'],0); m.bind(rows); m.paint(w)
 assert m.selected(w)==0; passed()
@@ -392,7 +428,7 @@ assert m.selected(w)==5 and m.get(w+O['SCROLL_Y'])==192
 w2,es2=m.page_list(10,extent=1000)
 assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+O['SCROLL_Y'])==192
 assert m.rounded[0]['rect']==(1,49,238,46) and m.rounded[0]['kind']=='fill'
-assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==es2[5]; passed()
+assert m.confirm()==11 and m.dispatched()[0][1]==es2[5]; passed()
 
 # Memory is per audited context: visiting another page leaves it alone.
 w3,es3=m.page_list(10,extent=1000,name='display_page')
@@ -403,7 +439,7 @@ assert m.paint(w4)==0 and m.selected(w4)==5; passed()
 # A stale remembered row is ignored when the new list is shorter.
 w5,es5=m.page_list(2,extent=300)
 assert m.paint(w5)==0 and m.selected(w5)==0
-assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==es5[0]; passed()
+assert m.confirm()==11 and m.dispatched()[0][1]==es5[0]; passed()
 
 # A settled swipe stores the row the user sees, not the pre-swipe selection.
 m=Machine(); w,es=m.page_list(10,extent=1000)
@@ -423,7 +459,7 @@ w2,es2=m.page_list(6,extent=1000)
 order=[4,0,1,2,3,5]
 for i,e in enumerate(es2): m.nodes[e]['text']='track %d'%order[i]
 assert m.paint(w2)==0 and m.selected(w2)==0
-assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==es2[0]; passed()
+assert m.confirm()==11 and m.dispatched()[0][1]==es2[0]; passed()
 # Rows without text fall back to the remembered index.
 m=Machine(); w,es=m.page_list(6,extent=1000)
 m.paint(w)
@@ -504,7 +540,7 @@ for i,e in enumerate(es2):
     sub=m.node('label'); stock_text(sub,['\u0100','\U0001f600','音楽','\u0200'][i])
     m.nodes[e]['children']=[sub]
 assert m.paint(w2)==0 and m.selected(w2)==3
-assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==es2[3]; passed()
+assert m.confirm()==11 and m.dispatched()[0][1]==es2[3]; passed()
 
 # Folder memory belongs to the full path, even when every visible row title is identical.
 m=Machine(); m.u.mem_write(syms['g_folder_path'],b'/sd/Folder A\0')
@@ -583,7 +619,7 @@ assert m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==48
 m.rebind=None
 w2,_,entries2=m.table_page()
 m.paint(w2); assert m.selected(w2)==2 and m.get(w2+O['TABLE_TOP'])==48
-assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==entries2[2]; passed()
+assert m.confirm()==11 and m.dispatched()[0][1]==entries2[2]; passed()
 
 # Table recall survives interruption even when the target is outside the recycled row pool.
 for wanted in (2,12):
@@ -597,7 +633,7 @@ for wanted in (2,12):
     m.word(w2+O['TABLE_TOP'],top); m.word(w2+O['TABLE_ANIMATOR'],0)
     m.bind(rs2,top)
     m.paint(w2); assert m.selected(w2)==wanted
-    m.call(O['KEY_CENTER']); assert m.dispatched()[0][1]==es2[1]
+    m.confirm(); assert m.dispatched()[0][1]==es2[1]
     passed()
 # A wheel during recall advances the logical target; an explicit tap instead replaces it.
 m=Machine(); w,rs,es=m.table_page(n=20); m.paint(w)
@@ -607,7 +643,7 @@ m.touch(); m.call(); assert m.selected(w2)==13
 m.click(es2[0]); assert m.get(w2+O['TABLE_ANIMATOR'])==0
 m.paint(w2)
 assert m.selected(w2)==0
-m.call(O['KEY_CENTER']); assert m.dispatched()[0][1]==es2[0]; passed()
+m.confirm(); assert m.dispatched()[0][1]==es2[0]; passed()
 
 # A synchronous restore rebind must discard the pre-scroll pool before centre dispatch.
 m=Machine(); w,rs,es=m.table_page(n=20); m.paint(w)
@@ -615,43 +651,164 @@ for _ in range(12): m.call()
 w2,rs2,es2=m.table_page()
 m.rebind=lambda a,offset: m.bind(rs2,offset)
 m.paint(w2); assert m.selected(w2)==12
-m.call(O['KEY_CENTER']); assert m.dispatched()[0][1]==es2[1]; passed()
+m.confirm(); assert m.dispatched()[0][1]==es2[1]; passed()
 
 # Home keeps its native carousel presentation and value (including touch changes).
 m=Machine(); w=m.page('home_page','slide_menu'); m.word(w+O['SLIDE_INDEX'],1)
 child=[m.entry(w),m.entry(w)]; m.nodes[w]['children']=child
 assert m.paint(w)==0 and not m.strokes and not m.rounded
 assert any(c[0]=='stock_paint' for c in m.calls)
-assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==child[1]
+assert m.confirm()==11 and m.dispatched()[0][1]==child[1]
 m.word(w+O['SLIDE_INDEX'],0)
-assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==child[0]; passed()
+assert m.confirm()==11 and m.dispatched()[0][1]==child[0]; passed()
 # Long-press/boot release must reach stock cleanup, never activate a menu item.
 for addr in [syms['g_power_longkey'],syms['g_ingore_bootkey_flag'],O['BOOT_KEY_GUARD']]:
-    m.byte(addr,1); assert m.call(O['KEY_CENTER'])==0 and not m.dispatched(); m.byte(addr,0); passed()
-# A quick second centre release reaches stock, whose short press toggles the screen.
+    m.byte(addr,1); assert m.confirm()==0 and not m.dispatched(); m.byte(addr,0); passed()
+# A single release confirms exactly once at 300ms, never at 299ms.
 m=Machine(); w,es=m.page_list(3)
-assert m.call(O['KEY_CENTER'])==11 and len(m.dispatched())==1
-assert m.call(O['KEY_CENTER'],gap=100)==0 and not m.dispatched()
-assert m.call(O['KEY_CENTER'],gap=100)==11 and len(m.dispatched())==1; passed()
-# A wheel detent ends the double-click window: the next press selects instead.
+assert m.release()==11 and not m.clicks
+m.advance(299); assert not m.clicks
+m.advance(1); assert m.clicks==[es[0]] and not m.timers and not m.screens
+m.advance(1000); assert m.clicks==[es[0]]; passed()
+# Before the deadline, the second release cancels the click and executes stock screen-off.
+for gap in (0,100,299):
+    m=Machine(); w,es=m.page_list(3)
+    assert m.release()==11 and m.release(gap)==0
+    assert m.screens==[0] and not m.u.mem_read(syms['g_backlight_status'],1)[0]
+    m.advance(1000); assert not m.clicks and not m.timers
+    # A release while off follows the real stock wake path, with no menu activation.
+    assert m.release()==0 and m.screens==[0,1]
+    assert m.u.mem_read(syms['g_backlight_status'],1)[0]==1 and not m.clicks; passed()
+# At/after expiry, the first single has dispatched; the next release starts a new single.
+for gap in (300,301):
+    m=Machine(); w,es=m.page_list(3)
+    assert m.release()==11 and m.release(gap)==11 and m.clicks==[es[0]]
+    m.advance(300); assert m.clicks==[es[0],es[0]] and not m.screens; passed()
+# Touch and either wheel direction cancel pending confirmation, including invalid navigation.
+for action in ('touch','next','prev'):
+    m=Machine(); w,es=m.page_list(3); m.release()
+    if action=='touch': m.call(address=HOOKS['on_wm_tsdown_before_fun'][0],gap=100)
+    else: m.call(O['KEY_NEXT'] if action=='next' else O['KEY_PREV'],gap=100)
+    m.advance(300); assert not m.clicks and not m.timers
+    assert m.release()==11
+    m.advance(300); assert len(m.clicks)==1 and not m.screens; passed()
+# Changed, destroyed, or address-reused targets cannot receive a delayed click.
+for change in ('top','surface','scope','selection','count','text','hidden','disabled',
+               'animating','pressed','screen_off','locked','long','boot','reused_top','reused_surface'):
+    m=Machine(); w,es=m.page_list(3,name='folder_page')
+    m.u.mem_write(syms['g_folder_path'],b'/first\0')
+    m.nodes[es[0]]['text']='First'
+    m.release()
+    if change=='top': m.page_list(3,name='display_page')
+    elif change=='surface': m.nodes[m.top]['children']=[m.node()]
+    elif change=='scope': m.u.mem_write(syms['g_folder_path'],b'/other\0')
+    elif change=='selection': m.nodes[w]['_ringnav_index']=1
+    elif change=='count': m.nodes[w]['children']=es[:2]
+    elif change=='text': m.nodes[es[0]]['text']='Rebound'
+    elif change=='hidden': m.nodes[w]['visible']=0
+    elif change=='disabled': m.nodes[es[0]]['enable']=0
+    elif change=='animating': m.animating=1
+    elif change=='pressed': m.pressed=1
+    elif change=='screen_off': m.byte(syms['g_backlight_status'],0)
+    elif change=='locked': m.byte(syms['g_lockscreen_pageflag'],1)
+    elif change=='long': m.byte(syms['g_power_longkey'],1)
+    elif change=='boot': m.byte(O['BOOT_KEY_GUARD'],1)
+    else: m.nodes[m.top if change=='reused_top' else w].pop('_ringnav_confirm')
+    m.advance(300); assert not m.clicks and not m.timers,change; passed()
+# A recycled table pool resolves the original logical index from the live row mapping.
+m=Machine(); w,rs,es=m.table_page(); m.release()
+m.word(rs[0]+O['ROW_INDEX'],1); m.word(rs[1]+O['ROW_INDEX'],0)
+m.advance(300); assert m.clicks==[es[1]]; passed()
+m=Machine(); w,rs,es=m.table_page(); m.release(); m.bind(rs,480)
+m.advance(300); assert not m.clicks; passed()
+# Invalid state observed before expiry stays cancelled even if the same page returns.
+m=Machine(); w,es=m.page_list(3); m.release(); m.animating=1
+m.call(gap=100); m.animating=0; m.advance(300)
+assert not m.clicks and not m.timers; passed()
+# Timer allocation failure consumes both releases without activation or screen toggling.
+m=Machine(); w,es=m.page_list(3); m.timer_fail=True
+assert m.release()==11 and m.release(100)==11
+m.advance(1000); assert not m.clicks and not m.screens and not m.timers; passed()
+# Empty menus never arm confirmation.
+m=Machine(); m.page()
+assert m.release()==11 and m.release(100)==11
+assert not m.timers and not m.clicks and not m.screens; passed()
+# Home accepts at 0 and 200ms; dropped detents/reversals do not move the deadline.
+for first in (O['KEY_NEXT'],O['KEY_PREV']):
+    m=Machine(); m.now=0; w=m.page('home_page','slide_menu')
+    assert m.call(first,gap=0)==11 and len(m.moved())==1
+    assert m.call(O['KEY_PREV'],gap=100)==11 and not m.moved()
+    assert m.call(O['KEY_NEXT'],gap=99)==11 and not m.moved()
+    assert m.call(first,gap=1)==11 and len(m.moved())==1
+    assert m.call(first,gap=199)==11 and not m.moved()
+    assert m.call(first,gap=1)==11 and len(m.moved())==1; passed()
+# Events rejected by stock debounce or UI animation do not reset/extend the home gate.
+for blocked in ('debounce','animating'):
+    m=Machine(); m.now=0; m.page('home_page','slide_menu')
+    m.call(gap=0)
+    if blocked=='debounce': m.byte(0xa37c89,1)
+    else: m.animating=1
+    assert m.call(gap=50,debounce=True)==11 and not m.moved()
+    m.animating=0
+    assert m.call(gap=149)==11 and not m.moved()
+    assert m.call(gap=1)==11 and len(m.moved())==1; passed()
+# Touch, centre and leaving home reset the home gate; a different slide menu is not throttled.
+for action in ('touch','center','leave'):
+    m=Machine(); w=m.page('home_page','slide_menu'); home=m.top
+    m.call(gap=0)
+    if action=='touch': m.call(address=HOOKS['on_wm_tsdown_before_fun'][0],gap=20)
+    elif action=='center': m.release(20)
+    else:
+        m.page('playing_page'); m.call(gap=20); m.top=home
+    assert m.call(gap=1)==11 and len(m.moved())==1; passed()
+m=Machine(); m.page('sysset_page','slide_menu')
+assert m.call(gap=0)==11 and m.call(gap=1)==11 and len(m.moved())==1; passed()
+# Even if the UI services a release before an overdue timer, both singles confirm once.
+m=Machine(); w,es=m.page_list(3); m.release(); m.now+=301
+assert m.release()==11 and m.clicks==[es[0]] and len(m.timers)==1
+m.advance(300); assert m.clicks==[es[0],es[0]] and not m.screens; passed()
+# Deadline expiry may navigate: the following release must resolve the new menu.
 m=Machine(); w,es=m.page_list(3)
-assert m.call(O['KEY_CENTER'])==11 and len(m.dispatched())==1
-m.call(gap=50)
-assert m.call(O['KEY_CENTER'],gap=50)==11 and len(m.dispatched())==1; passed()
-# An empty menu consumes both presses; the window only arms after a real click.
-m=Machine(); w=m.page()
-assert m.call(O['KEY_CENTER'])==11 and not m.dispatched()
-assert m.call(O['KEY_CENTER'],gap=100)==11 and not m.dispatched(); passed()
-# A touch between the releases cancels the pair: the second press selects again.
-m=Machine(); w,es=m.page_list(3)
-assert m.call(O['KEY_CENTER'])==11 and len(m.dispatched())==1
-m.call(address=HOOKS['on_wm_tsdown_before_fun'][0], gap=100)
-assert m.call(O['KEY_CENTER'],gap=100)==11 and m.dispatched()[0][1]==es[0]; passed()
-# A different top window cancels the pair too: no screen toggle after navigation.
-m=Machine(); w,es=m.page_list(3)
-assert m.call(O['KEY_CENTER'])==11 and len(m.dispatched())==1
-w2,es2=m.page_list(3,name='display_page')
-assert m.call(O['KEY_CENTER'],gap=100)==11 and m.dispatched()[0][1]==es2[0]; passed()
+def navigate(a,b):
+    m.on_click=None
+    m.page_list(3,name='display_page')
+m.on_click=navigate; m.release(); old=m.top
+assert m.release(301)==11 and m.top!=old and len(m.clicks)==1
+m.advance(300); assert len(m.clicks)==2 and m.clicks[0]!=m.clicks[1] and not m.screens; passed()
+# The downstream stock cleanup still owns long-press and boot-key releases.
+for addr in (syms['g_power_longkey'],syms['g_ingore_bootkey_flag'],O['BOOT_KEY_GUARD']):
+    m=Machine(); m.page_list(3); m.byte(addr,1)
+    assert m.release()==0
+    m.advance(300)
+    assert not m.clicks and not m.screens and not m.timers and m.u.mem_read(addr,1)==b'\0'; passed()
+# Play/Pause reaches the real stock downstream handler, including on a supported page.
+m=Machine(); m.page_list(3)
+assert m.call(O['KEY_PLAY'])==0
+m.call(O['KEY_PLAY'],address=syms['on_wm_keyup_fun'],gap=0)
+assert any(c[0]=='playpause_quick_click' for c in m.calls) and not m.clicks; passed()
+# A root-window paint observes leaving navigation even when the new page has no pane.
+m=Machine(); w,es=m.page_list(3); m.release(); old=m.top
+m.top=m.node('window','playing_page'); m.call(address=HOOKS['widget_on_paint_border'][0],
+    args=(m.top,m.canvas,0,0),gap=100)
+m.top=old; m.advance(300); assert not m.clicks and not m.timers; passed()
+m=Machine(); w=m.page('home_page','slide_menu'); home=m.top; m.call(gap=0)
+m.top=m.node('window','playing_page'); m.call(address=HOOKS['widget_on_paint_border'][0],
+    args=(m.top,m.canvas,0,0),gap=20)
+m.top=home; assert m.call(gap=1)==11 and len(m.moved())==1; passed()
+# Local query and home selection changes invalidate pending confirmation too.
+m=Machine(); w,rs,es=m.table_page(); m.release()
+m.word(syms['g_class_type'],0xf002); m.advance(300); assert not m.clicks; passed()
+m=Machine(); w=m.page('home_page','slide_menu')
+m.word(w+O['SLIDE_INDEX'],0); m.nodes[w]['children']=[m.entry(w),m.entry(w)]
+m.release(); m.word(w+O['SLIDE_INDEX'],1); m.advance(300); assert not m.clicks; passed()
+# Unsigned milliseconds may wrap while a home interval or confirmation is pending.
+m=Machine(); m.now=0xfffffff0; m.page('home_page','slide_menu')
+assert m.call(gap=0)==11 and len(m.moved())==1
+assert m.call(gap=199)==11 and not m.moved()
+assert m.call(gap=1)==11 and len(m.moved())==1; passed()
+m=Machine(); m.now=0xfffffff0; m.page_list(3)
+assert m.release()==11 and m.release(299)==0
+m.advance(300); assert not m.clicks and m.screens==[0]; passed()
 # Fast same-direction detents accelerate; a slow detent or a reversal starts over.
 m=Machine(); w,es=m.page_list(40,extent=40*48)
 m.paint(w)
@@ -696,12 +853,12 @@ m=Machine(); w,es=m.page_list(6)
 m.paint(w); m.glide=False
 m.call(); m.call(); assert m.selected(w)==2 and m.get(w+O['SCROLL_Y'])==0
 m.paint(w); assert m.selected(w)==2
-assert m.call(O['KEY_CENTER'])==11 and m.dispatched()[0][1]==es[2]
+assert m.confirm()==11 and m.dispatched()[0][1]==es[2]
 m.call(); assert m.selected(w)==3
 m.call(O['KEY_PREV']); assert m.selected(w)==2
 m.call(O['KEY_PREV']); assert m.selected(w)==1 and m.get(w+O['VIEW_ANIMATOR'])==0; passed()
 # Empty menus never activate or turn off the screen; touch doesn't swallow its first event.
-m=Machine(); w=m.page(); assert m.call(O['KEY_CENTER'])==11 and not m.dispatched()
+m=Machine(); w=m.page(); assert m.confirm()==11 and not m.dispatched()
 assert m.touch()==0 and not m.dispatched(); passed()
 # Clip an oversized target to its surface without losing its selection.
 m=Machine(); w=m.page(); m.word(w+O['W_H'],96)
@@ -754,9 +911,9 @@ for seeded in ((),(0,),(0,1)):
     assert m.selected(a)==-1 and m.selected(b)==1
     m.paint(a); assert not m.rounded and not m.strokes
     m.paint(b); assert m.rounded
-    m.call(O['KEY_CENTER']); assert m.dispatched()[0][1]==be[1]
+    m.confirm(); assert m.dispatched()[0][1]==be[1]
     m.call(); assert m.selected(b)==2
-    m.touch(); m.click(ae[0]); m.call(O['KEY_CENTER'])
+    m.touch(); m.click(ae[0]); m.confirm()
     assert m.selected(b)==-1 and m.dispatched()[0][1]==ae[0]
     passed()
 

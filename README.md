@@ -28,9 +28,9 @@ If the UI is not working, use [Shanling's recovery package](https://drive.google
 
 ## Controls
 
-- Turn the scroll wheel to move through menu items; a fast spin skips further.
-- Short press the centre button to open the highlighted item.
-- Double-press the centre button to turn the screen off.
+- Turn the scroll wheel to move through menu items; a fast spin skips further in lists. Home cards move at most once every 200 ms, making them easier to select.
+- Short press the centre button to open the highlighted item after a 300 ms confirmation delay.
+- Double-press the centre button within 300 ms to turn the screen off without opening an item. Touch or wheel input cancels a pending confirmation.
 - Tap and swipe still work normally; tapping a row in another visible pane moves wheel control there.
 - Turning the wheel during a swipe stops the scrolling and takes over again.
 - Returning to the same remembered menu restores your selection. A different folder or local music query starts from its own viewport.
@@ -55,7 +55,7 @@ If you find a menu where something behaves strangely, please open an issue and s
 
 # Technical details
 
-Only `release/bin/demo` inside `rootfs.squashfs` changes. The kernel is byte-identical, and the builder checks every other inode's name, type, mtime, mode, uid and gid against stock.
+`release/bin/demo` and the boot logo inside `rootfs.squashfs` change. The kernel is byte-identical, and the builder checks every other inode's name, type, mtime, mode, uid and gid against stock.
 
 Four checked MIPS prologues redirect into a payload at `0xb00000`, using the final unused `PT_NULL` program header. Trampolines restore the stock GOT base and resume each original function after its PIC setup:
 
@@ -74,7 +74,9 @@ Non-virtual lists also remember hashes of the selected row's first two text valu
 
 Wheel detents accelerate: consecutive detents less than 140 ms apart in the same direction double the step every third detent, up to eight entries. A pause, a reversal, a touch or a centre press starts the count over. Music tables glide with the stock `table_client_scroll_to` animator instead of jumping, so both list kinds settle the same way.
 
-A centre release within 400 ms of the previous one is handed back to the stock key-up chain, whose short press toggles the screen through `screen_action`; the first press of the pair still opens the highlighted item. The pair only counts when both releases land on the same top window and navigation surface, and any touch or wheel detent clears it. A first press that navigated therefore makes the second press act on the new screen rather than toggle the screen: a quick second press while clicking through menus must never darken the display. The payload maps writable state at `0xb0f000` for the last release, the window/surface identity and the detent timing.
+A centre release arms a stock UI timer for `DOUBLE_CLICK_MS` (300 ms). A second release before expiry on the same live selection cancels confirmation and passes through the stock downstream key-up handler to turn the screen off. A single release dispatches exactly one synchronous click at expiry. Touch, wheel input and invalid navigation state cancel pending confirmation. The timer resolves the target from the live menu and requires the original window, surface, content scope, logical selection, row count and row-text identity to match. Widget-owned tokens also reject reused window/surface addresses. No delayed row pointer is retained; pending state clears before dispatch. Timer allocation failure consumes the press without activating anything.
+
+The home carousel uses `HOME_WHEEL_MS` (200 ms) between accepted wheel steps in either direction. The first step is immediate; intermediate events are consumed without queuing or extending the interval. Touch, centre press and leaving home reset the interval. List acceleration is unchanged. Both timing constants are in `patch/ringnav.c` for hardware tuning. Writable input and position state is mapped at `0xb0f000`.
 
 A native click chooses its pane from the actual target before walking up to the nearest collected ancestor. A successful selection clears the other pane’s selection and invalidates both panes, so the outline, wheel and centre follow the row that owns the tap. Hidden, disabled and inactive-page panes remain excluded.
 
@@ -103,7 +105,7 @@ python3 tools/test_patch.py /tmp/q2-build  # requires unicorn==2.1.4
 
 The suite executes the actual patched MIPS payload and stock key/touch filters. UI services are mocked; separate scenarios execute the stock canvas clip/color/rectangle code and the stock rounded fill/stroke entry points down to mocked LCD and vgcanvas sinks.
 
-Checks cover touch reselection, gesture suppression, momentum handoff, interrupted and reversed wheel glides, acceleration steps and resets, recycled rows, menu return, count changes, empty/oversized rows, per-context position memory, re-sorted lists, duplicate-text rows through the real stock UTF-32 accessor, stale remembered rows, folder/query scope changes, interrupted table and scroll-view restore glides, touch-driven multi-pane ownership, centre-nearest swipe settle, preserved Play/Pause, power-release exclusions, the double-press window and its touch/page-change exclusions, nested tap targets and stock key-lock parity. The outline checks cover draw order, rectangle and radius arguments, the separator and white line colors, clip intersection, state restore (including unusual saved colors and untouched alpha bytes) and the square fallback for small rows and for a backend that declines the rounded stroke. Every call checks preserved registers/stack, and native calls check the PIC `$t9` convention.
+Checks cover touch reselection, gesture suppression, momentum handoff, interrupted and reversed wheel glides, acceleration steps and resets, recycled rows, menu return, count changes, empty/oversized rows, per-context position memory, re-sorted lists, duplicate-text rows through the real stock UTF-32 accessor, stale remembered rows, folder/query scope changes, interrupted table and scroll-view restore glides, touch-driven multi-pane ownership, centre-nearest swipe settle, preserved Play/Pause, power-release exclusions, deterministic confirmation timers, deadline boundaries, cancellation, allocation failure, changed/recycled targets, the real stock downstream screen-off/wake handler and home wheel interval/reset boundaries, nested tap targets and stock key-lock parity. The outline checks cover draw order, rectangle and radius arguments, the separator and white line colors, clip intersection, state restore (including unusual saved colors and untouched alpha bytes) and the square fallback for small rows and for a backend that declines the rounded stroke. Every call checks preserved registers/stack, and native calls check the PIC `$t9` convention.
 
 The CPU-LCD fill path runs end to end down to mocked LCD sinks, including radius clamping, the `radius <= 2` decline and allocation balance. The stock rounded vgcanvas branch could not be executed end to end under Unicorn 2.1.4: the stock binary is built `-mfp64` and Unicorn's MIPS32 FPU only implements `FR=0`, so its 64-bit conversions trap. The test harness runs the branch up to the first such instruction and asserts the vgcanvas color and line-width calls that precede it.
 

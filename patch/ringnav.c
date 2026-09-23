@@ -3,7 +3,8 @@
 #include "stock.h"
 #define STOP 11
 #define GLIDE_MS 300
-#define DOUBLE_CLICK_MS 400
+#define DOUBLE_CLICK_MS 300
+#define HOME_WHEEL_MS 200
 #define ACCEL_MS 140
 #define ACCEL_DIV 3
 #define ACCEL_MAX 8
@@ -20,11 +21,15 @@
 #define B(p, o) (*(unsigned char *)((char *)(p) + (o)))
 
 /* Writable state lives in the zero-filled page the builder maps past the payload text.
- * last_center arms the screen toggle pair; wheel_* scale repeated fast detents; pos_* remember
+ * center_timer defers confirmation; wheel_* scale repeated fast detents; pos_* remember
  * the selected row per audited context across page recreation; reveal_* pin the recall glide so
  * an interruption cannot silently rewrite that memory. */
 typedef struct {
-    unsigned last_center;        /* release time of the last selection press */
+    unsigned last_center; /* release time of the pending selection press */
+    unsigned center_timer, center_token, center_scope, center_hash, center_hash2;
+    int center_id, center_ctx, center_rows;
+    unsigned last_home;
+    void *home_surface;          /* non-null also marks a step accepted at time zero */
     void *center_top;            /* top window of that press */
     void *center_surface;        /* navigation surface of that press */
     unsigned last_wheel;         /* time of the previous wheel detent */
@@ -157,6 +162,18 @@ static void collect(void *w, entries_t *s, int depth) {
 #define COUNT "_ringnav_count"
 #define SCOPE "_ringnav_scope"
 
+static void cancel_center(void) {
+    unsigned timer = st.center_timer;
+    st.center_timer = 0;
+    st.center_top = st.center_surface = (void *)0;
+    if (timer) timer_remove(timer);
+}
+
+static int is_home(void *top, void *w) {
+    return top && w && kind(w) == 3 &&
+           !tk_strcmp(widget_get_prop_str(top, "name", ""), "home_page");
+}
+
 static int usable(void) {
     return g_backlight_status && !g_lockscreen_pageflag && !g_testmode_flag && !g_guideflag &&
            !g_poweroff_state && g_usblink_status != 2 && !bt__recv_pageflag;
@@ -193,11 +210,13 @@ static void *surface_under(void *top, void *target, void **other, int wheel) {
 }
 
 static void *surface(void *target, void **other) {
-    if (!usable()) return (void *)0;
-    void *wm = window_manager();
-    if (window_manager_is_animating(wm)) return (void *)0;
-    void *top = window_manager_get_top_window(wm);
-    return allowed_top(top) ? surface_under(top, target, other, 0) : (void *)0;
+    void *wm = window_manager(), *top = window_manager_get_top_window(wm);
+    void *w = usable() && !window_manager_is_animating(wm) && allowed_top(top)
+                  ? surface_under(top, target, other, 0)
+                  : (void *)0;
+    if (st.center_timer && (top != st.center_top || w != st.center_surface)) cancel_center();
+    if (!is_home(top, w) || w != st.home_surface) st.home_surface = (void *)0;
+    return w;
 }
 
 static void prop(void *w, const char *name, int value) {
@@ -289,6 +308,7 @@ static void reveal(menu_t *m, int id, int cancel);
  * Non-virtual lists also remember the row's first two text values, so a reordered list restores
  * the same item and duplicate names can be told apart by their second line. */
 static void select(menu_t *m, int id) {
+    if (st.center_timer && (m->w != st.center_surface || id != st.center_id)) cancel_center();
     if (st.reveal_surface == m->w) st.reveal_surface = (void *)0;
     unsigned hash = 0, hash2 = 0;
     if (id >= 0) {
@@ -518,6 +538,40 @@ static int reconcile(menu_t *m, int settle) {
     return cur;
 }
 
+/* Resolve only live rows. Widget-owned tokens reject a recreated window/surface even when
+ * the allocator reuses its address; text hashes reject a rebound item at the same index. */
+#define CONFIRM "_ringnav_confirm"
+static int pending_matches(void *top, menu_t *m) {
+    int id = m->kind == 3 ? I(m->w, SLIDE_INDEX) : widget_get_prop_int(m->w, SEL, -1);
+    int i = index_of(m, id);
+    if (top != st.center_top || m->w != st.center_surface || m->scope != st.center_scope ||
+        m->ctx != st.center_ctx || m->rows != st.center_rows || id != st.center_id || i < 0 ||
+        (unsigned)widget_get_prop_int(top, CONFIRM, 0) != st.center_token ||
+        (unsigned)widget_get_prop_int(m->w, CONFIRM, 0) != st.center_token)
+        return 0;
+    row_id_t r = row_id(m->at[i]);
+    return r.one == st.center_hash && r.two == st.center_hash2;
+}
+
+static int confirm_center(const void *info) {
+    (void)info;
+    void *w = surface((void *)0, (void *)0);
+    if (!st.center_timer) return 0;
+    /* Stock removes this one-shot after return; never repeat (RET_REPEAT=8). */
+    st.center_timer = 0;
+    void *top = window_manager_get_top_window(window_manager());
+    int valid = w && !window_manager_get_pointer_pressed(window_manager()) && !g_power_longkey &&
+                !g_ingore_bootkey_flag && !*(volatile unsigned char *)BOOT_KEY_GUARD &&
+                load(&g_menu, w) && pending_matches(top, &g_menu);
+    cancel_center(); /* Clear before any app callback can destroy or navigate the page. */
+    if (valid) {
+        void *target = g_menu.at[index_of(&g_menu, st.center_id)];
+        char click[0x30];
+        stock_dispatch(target, pointer_event_init(click, EVT_CLICK, target, 0, 0));
+    }
+    return 0;
+}
+
 /* Stock paints children first and calls this with the surface's canvas origin restored.
  * The selected row gets one neutral white outline seated on a dark shade line: the shade is the
  * stock dark surface at an alpha high enough to hold the white over bright album art, and being
@@ -526,8 +580,22 @@ static int reconcile(menu_t *m, int settle) {
  * flag. Small rows and degenerate geometry keep the square fallback. */
 int ringnav_paint(void *w, void *canvas) {
     int result = stock_paint(w, canvas);
+    /* Even a page with no navigable pane must end pending input when it is painted. */
+    if (st.center_timer || st.home_surface) {
+        void *wm = window_manager(), *top = window_manager_get_top_window(wm);
+        if (!usable() || window_manager_is_animating(wm) || top != st.center_top) cancel_center();
+        if (!top || tk_strcmp(widget_get_prop_str(top, "name", ""), "home_page"))
+            st.home_surface = (void *)0;
+    }
     if (!w || !canvas || !kind(w) || surface((void *)0, (void *)0) != w) return result;
-    if (!load(&g_menu, w) || g_menu.kind == 3) return result; /* Home shows its selected card. */
+    if (!load(&g_menu, w)) {
+        cancel_center();
+        return result;
+    }
+    if (st.center_timer &&
+        !pending_matches(window_manager_get_top_window(window_manager()), &g_menu))
+        cancel_center();
+    if (g_menu.kind == 3) return result; /* Home shows its selected card. */
     int i = reconcile(&g_menu,
                       !moving(&g_menu) && !window_manager_get_pointer_pressed(window_manager()));
     if (i < 0) return result;
@@ -580,8 +648,8 @@ int ringnav_paint(void *w, void *canvas) {
 int ringnav_touch(void *ctx, void *event) {
     int result = stock_touch(ctx, event);
     /* A tap is a fresh interaction: it cancels a pending screen-toggle pair and any spin. */
-    st.last_center = 0;
-    st.center_top = st.center_surface = (void *)0;
+    cancel_center();
+    st.home_surface = (void *)0;
     st.last_wheel = 0;
     void *w = surface((void *)0, (void *)0);
     if (!result && w && load(&g_menu, w)) {
@@ -627,52 +695,92 @@ int ringnav_dispatch(void *target, void *event) {
 
 int ringnav(void *ctx, void *event) {
     int result = stock_keyup(ctx, event);
-    if (result || !event) return result;
+    if (result || !event) {
+        cancel_center();
+        /* A stock-rejected wheel event must not restart the home interval. */
+        if (!event || I(event, EVENT_KEY) == KEY_CENTER || !usable()) st.home_surface = (void *)0;
+        return result;
+    }
     unsigned key = (unsigned)I(event, EVENT_KEY);
     if (key != KEY_CENTER && key != KEY_PREV && key != KEY_NEXT) return result;
-    if (!usable()) return result;
+    if (key == KEY_CENTER) {
+        st.last_wheel = 0;
+        st.home_surface = (void *)0;
+    } else
+        cancel_center();
+    if (!usable()) {
+        cancel_center();
+        st.home_surface = (void *)0;
+        return result;
+    }
     /* Match the stock power-key release exclusions, including release after long press. */
     if (key == KEY_CENTER &&
-        (g_power_longkey || g_ingore_bootkey_flag || *(volatile unsigned char *)BOOT_KEY_GUARD))
+        (g_power_longkey || g_ingore_bootkey_flag || *(volatile unsigned char *)BOOT_KEY_GUARD)) {
+        cancel_center();
         return result;
+    }
+    if (st.center_timer && (unsigned)time_now_ms() - st.last_center >= DOUBLE_CLICK_MS) {
+        unsigned timer = st.center_timer;
+        confirm_center((void *)0);
+        timer_remove(timer);
+    }
     void *wm = window_manager(), *top = window_manager_get_top_window(wm);
-    if (!allowed_top(top)) return result;
-    if (window_manager_is_animating(wm) || window_manager_get_pointer_pressed(wm)) return STOP;
+    if (!allowed_top(top)) {
+        cancel_center();
+        st.home_surface = (void *)0;
+        return result;
+    }
+    if (tk_strcmp(widget_get_prop_str(top, "name", ""), "home_page")) st.home_surface = (void *)0;
+    if (window_manager_is_animating(wm) || window_manager_get_pointer_pressed(wm)) {
+        cancel_center();
+        return STOP;
+    }
     int dir = key == KEY_NEXT ? 1 : key == KEY_PREV ? -1 : 0;
     void *w = surface_under(top, (void *)0, (void *)0, dir != 0);
-    if (!w) return dir ? STOP : result;
-    if (!load(&g_menu, w)) return dir ? STOP : result;
+    if (!is_home(top, w) || w != st.home_surface) st.home_surface = (void *)0;
+    if (!w || !load(&g_menu, w)) {
+        cancel_center();
+        return dir ? STOP : result;
+    }
+    if (st.center_timer && !pending_matches(top, &g_menu)) cancel_center();
     int touch = widget_get_prop_int(w, TOUCH, 0);
     if (touch) stop_scroll(&g_menu);
     int cur = reconcile(&g_menu, touch || !moving(&g_menu));
     unsigned now = (unsigned)time_now_ms();
     if (!dir) {
-        /* Only a second release on the very same screen is a screen-toggle pair, so a quick
-         * second press while clicking through menus can never darken the screen. The accepted
-         * cost is that after the first press navigated, the second press acts on the new screen
-         * instead of toggling; the README states this limitation. */
-        if (st.last_center && now - st.last_center <= DOUBLE_CLICK_MS && st.center_top == top &&
-            st.center_surface == w) {
-            st.last_center = 0;
-            st.center_top = st.center_surface = (void *)0;
-            /* Second release of a double click: the stock short press toggles the screen. */
-            return result;
+        if (st.center_timer && now - st.last_center < DOUBLE_CLICK_MS) {
+            cancel_center();
+            return result; /* Let the stock downstream short-press handler turn the screen off. */
         }
+        cancel_center();
         if (cur < 0) return STOP;
+        select(&g_menu, g_menu.id[cur]);
+        widget_invalidate_force(w, (void *)0);
         st.last_center = now;
         st.center_top = top;
         st.center_surface = w;
-        st.last_wheel = 0; /* A press ends any spin. */
-        select(&g_menu, g_menu.id[cur]);
-        widget_invalidate_force(w, (void *)0);
-        char click[0x30];
-        /* Synchronous native click: no queued recycled row can change the activated item. */
-        stock_dispatch(g_menu.at[cur], pointer_event_init(click, EVT_CLICK, g_menu.at[cur], 0, 0));
-        return STOP; /* No widget access after the app callback. */
+        st.center_scope = g_menu.scope;
+        st.center_ctx = g_menu.ctx;
+        st.center_rows = g_menu.rows;
+        st.center_id = g_menu.id[cur];
+        row_id_t r = row_id(g_menu.at[cur]);
+        st.center_hash = r.one;
+        st.center_hash2 = r.two;
+        st.center_timer = timer_add(confirm_center, (void *)0, DOUBLE_CLICK_MS);
+        st.center_token = st.center_timer;
+        if (st.center_timer) {
+            prop(top, CONFIRM, (int)st.center_token);
+            prop(w, CONFIRM, (int)st.center_token);
+        } else
+            cancel_center(); /* Allocation failure consumes the press without a click. */
+        return STOP;
     }
-    st.last_center = 0; /* A wheel detent ends the double-click window. */
-    st.center_top = st.center_surface = (void *)0;
     prop(w, TOUCH, 0);
+    if (is_home(top, w)) {
+        if (st.home_surface == w && now - st.last_home < HOME_WHEEL_MS) return STOP;
+        st.home_surface = w;
+        st.last_home = now;
+    }
     int step = wheel_step(dir, now);
     if (g_menu.kind == 3) {
         if (dir > 0)

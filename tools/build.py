@@ -92,6 +92,8 @@ FUNCTIONS = {
  'canvas_stroke_rounded_rect': ('int', 'void *, const void *, const void *, const void *, unsigned, unsigned'),
  'pointer_event_init': ('void *', 'void *, int, void *, int, int'),
  'time_now_ms': ('unsigned', 'void'),
+ 'timer_add': ('unsigned', 'int (*)(const void *), void *, unsigned'),
+ 'timer_remove': ('int', 'unsigned'),
  'tk_strcmp': ('int', 'const char *, const char *'),
  'slide_menu_scroll_to_next': ('int', 'void *'),
  'slide_menu_scroll_to_prev': ('int', 'void *'),
