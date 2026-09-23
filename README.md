@@ -4,7 +4,7 @@ Firmware mod for the Shanling Q2 that lets you use the scroll wheel to move thro
 
 The touchscreen still works normally. Outside supported menus, the wheel still controls volume.
 
-**Latest firmware: V2.0R**
+**Latest firmware: V2.1R**
 
 [**Download the latest release**](https://github.com/DiamondBond/q2-ringnav/releases/latest)
 
@@ -16,7 +16,7 @@ Make sure the Q2 is charged before updating, and don't remove the microSD card w
 2. Unzip it and copy `update.tar` to the root of your microSD card.
 3. On the Q2, go to **System settings → System Update → TF card update**.
 4. Confirm the update and wait for the player to restart.
-5. Check **About** and make sure it shows `V2.0R`.
+5. Check **About** and make sure it shows `V2.1R`.
 
 To restore stock firmware via the UI; flash the [Shanling Q2 official firmware](https://en.shanling.com/download/150) through **System settings → System Update → TF card update**.
 
@@ -45,6 +45,7 @@ If you find a menu where something behaves strangely, please open an issue and s
 
 ## Changelog
 
+- **V2.1R**: Fast-spin acceleration stays within the current menu and resets after a folder/query change, list resize, interrupted gesture or sleep. Oversized rows reveal their title consistently when selected or restored.
 - **V2.0R**: Centre presses now confirm after 300 ms, allowing a second press within that window to turn the screen off. Home carousel wheel input is paced to make cards easier to select. Includes an orientation fixed boot logo.
 - **V1.9R**: The selection outline is now one crisp white line over a dark separator and the subtle dark fill, so it stays readable over bright album art. A canvas that declines rounded drawing keeps the square outline.
 - **V1.8R**: Wheel acceleration, gliding music tables, a scoped double-press screen toggle, nested tap-target selection, per-context position memory with row-text identity, multi-pane surface selection, a centre-nearest swipe settle and a build-time context audit.
@@ -73,7 +74,7 @@ Position memory is indexed by the audited top-window name in `patch/contexts.inc
 
 Non-virtual lists also remember hashes of the selected row's first two text values, read through the stock `widget_get_text` UTF-32 accessor. A matching second text outranks proximity; equal matches choose the occurrence nearest the remembered index. Rows without text fall back to the index within the same content scope. The stock rows expose no stable item id. Both scroll views and virtual music tables protect an interrupted recall glide from silently replacing the remembered selection with a currently visible row. A real tap cancels the glide and selects its target; a wheel detent advances from the remembered logical row. Synchronous table rebinds discard the old row-pool snapshot before resolving the selected entry.
 
-Wheel detents accelerate: consecutive detents less than 140 ms apart in the same direction double the step every third detent, up to eight entries. A pause, a reversal, a touch or a centre press starts the count over. Music tables glide with the stock `table_client_scroll_to` animator instead of jumping, so both list kinds settle the same way.
+Wheel detents accelerate: consecutive detents at most 140 ms apart in the same direction double the step every third detent, up to eight entries. A pause, a reversal, a touch or a centre press starts the count over. Acceleration belongs to the current window, pane and browsing scope; a list resize or rejected navigation input also resets it. Music tables glide with the stock `table_client_scroll_to` animator instead of jumping, so both list kinds settle the same way. Rows taller than the viewport align their top edge when selected or restored, keeping their title visible.
 
 A centre release arms a stock UI timer for `DOUBLE_CLICK_MS` (300 ms). A second release before expiry on the same live selection cancels confirmation and passes through the stock downstream key-up handler to turn the screen off. A single release dispatches exactly one synchronous click at expiry. Touch, wheel input and invalid navigation state cancel pending confirmation. The timer resolves the target from the live menu and requires the original window, surface, content scope, logical selection, row count and row-text identity to match. Widget-owned tokens also reject reused window/surface addresses. No delayed row pointer is retained; pending state clears before dispatch. Timer allocation failure consumes the press without activating anything.
 

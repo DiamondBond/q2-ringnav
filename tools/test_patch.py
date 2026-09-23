@@ -823,6 +823,46 @@ assert m.call(gap=50)==11 and m.get(w+O['TABLE_TOP'])==48
 assert m.call(gap=50)==11 and m.get(w+O['TABLE_TOP'])==96
 assert m.call(gap=50)==11 and m.get(w+O['TABLE_TOP'])==192
 assert m.call(gap=1000)==11 and m.get(w+O['TABLE_TOP'])==240; passed()
+# A fast spin belongs to its live menu, pane and browsing scope.
+for change in ('window','pane','scope','count','gesture','screen','unsupported','touch','centre'):
+    m=Machine(); w,es=m.page_list(40,extent=40*48,name='allmusic_page')
+    for _ in range(5): m.call(gap=50)
+    assert m.selected(w)==8
+    if change=='window':
+        w,es=m.page_list(40,extent=40*48,name='allmusic_page')
+    elif change=='pane':
+        old=m.top
+        w,es=m.page_list(40,extent=40*48,name='allmusic_page')
+        m.nodes[old]['children']=[w]; m.top=old
+    elif change=='scope': m.word(syms['g_class_type'],0xf002)
+    elif change=='count': m.nodes[w]['children'].pop()
+    elif change=='gesture':
+        m.pressed=1; m.call(gap=10); m.pressed=0
+    elif change=='screen':
+        m.byte(syms['g_backlight_status'],0); m.call(gap=10)
+        m.byte(syms['g_backlight_status'],1)
+    elif change=='unsupported':
+        m.nodes[m.top]['name']='playing_page'; m.call(gap=10)
+        m.nodes[m.top]['name']='allmusic_page'
+    elif change=='touch':
+        m.call(address=HOOKS['on_wm_tsdown_before_fun'][0],gap=10)
+    else: m.call(O['KEY_CENTER'],gap=10)
+    m.call(address=HOOKS['widget_on_paint_border'][0],args=(w,m.canvas,0,0),gap=0)
+    before=m.selected(w)
+    assert m.call(gap=50)==11 and m.selected(w)==before+1,change
+    passed()
+# Time zero and the 32-bit clock wrap preserve the same acceleration cadence.
+for start in (0,0xfffffff0):
+    m=Machine(); m.now=start; w,es=m.page_list(40,extent=40*48)
+    for gap,want in ((0,1),(50,2),(50,4)):
+        assert m.call(gap=gap)==11 and m.selected(w)==want
+    passed()
+# Hardware debounce drops duplicate events without breaking a deliberate fast spin.
+m=Machine(); w,es=m.page_list(40,extent=40*48)
+m.call(gap=50); m.call(gap=50)
+m.byte(0xa37c89,1)
+assert m.call(gap=10,debounce=True)==11 and m.selected(w)==2
+assert m.call(gap=40)==11 and m.selected(w)==4; passed()
 # A click on a clickable child selects its collected ancestor, not a stale row.
 m=Machine(); w=m.page(); m.word(w+O['W_H'],96)
 row1=m.entry(w,0); row2=m.entry(w,96); deep=m.entry(row1,0)
@@ -866,6 +906,15 @@ e=m.entry(w); m.word(e+O['W_H'],140); m.nodes[w]['children']=[e]
 m.paint(w)
 assert m.selected(w)==0 and [r['kind'] for r in m.rounded]==['fill','stroke','stroke']
 assert m.rounded[0]['rect']==(1,1,238,138) and all(r['clip']==(0,0,240,96) for r in m.rounded); passed()
+# Entering a tall row from either direction reveals its title, including after recreation.
+m=Machine(); w,es=m.page_list(3,height=96,extent=400)
+m.word(es[1]+O['W_H'],140); m.word(es[2]+O['W_Y'],188)
+m.call(); assert m.selected(w)==1 and m.get(w+O['SCROLL_Y'])==48
+m.call(); m.call(O['KEY_PREV'])
+assert m.selected(w)==1 and m.get(w+O['SCROLL_Y'])==48
+w,es=m.page_list(3,height=96,extent=400)
+m.word(es[1]+O['W_H'],140); m.word(es[2]+O['W_Y'],188)
+m.paint(w); assert m.selected(w)==1 and m.get(w+O['SCROLL_Y'])==48; passed()
 
 # Small rows keep the square shade-plus-white outline; the rounded path starts only when both
 # outer dimensions exceed 2*RADIUS. Tiny rows are skipped outright, never with negative sizes.

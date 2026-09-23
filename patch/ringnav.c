@@ -29,12 +29,14 @@ typedef struct {
     unsigned center_timer, center_token, center_scope, center_hash, center_hash2;
     int center_id, center_ctx, center_rows;
     unsigned last_home;
-    void *home_surface;          /* non-null also marks a step accepted at time zero */
-    void *center_top;            /* top window of that press */
-    void *center_surface;        /* navigation surface of that press */
-    unsigned last_wheel;         /* time of the previous wheel detent */
-    int wheel_dir;               /* direction of that detent */
-    unsigned wheel_run;          /* consecutive fast detents in that direction */
+    void *home_surface;   /* non-null also marks a step accepted at time zero */
+    void *center_top;     /* top window of that press */
+    void *center_surface; /* navigation surface of that press */
+    unsigned last_wheel;  /* time of the previous wheel detent */
+    int wheel_dir;        /* direction of that detent */
+    unsigned wheel_run;   /* consecutive fast detents in that direction */
+    void *wheel_top, *wheel_surface;
+    unsigned wheel_scope;
     int pos_id[POS_MEM];         /* last selected logical row + 1 per audited context; 0 = unused */
     unsigned pos_hash[POS_MEM];  /* hash of the row's first text; 0 when the row has none */
     unsigned pos_hash2[POS_MEM]; /* hash of its second text; 0 when the row has only one */
@@ -118,13 +120,17 @@ static int clamp_step(int offset, int maximum, int delta) {
  * an iPod wheel: x2 every ACCEL_DIV detents, capped at ACCEL_MAX. A pause or reversal
  * starts over. Stock rate-limits wheel keys to roughly one per 80-200 ms, so real ticks
  * land inside the acceleration window. */
-static int wheel_step(int dir, unsigned now) {
-    if (st.last_wheel && now - st.last_wheel <= ACCEL_MS && st.wheel_dir == dir)
-        ++st.wheel_run;
+static int wheel_step(menu_t *m, void *top, int dir, unsigned now) {
+    if (st.wheel_run && now - st.last_wheel <= ACCEL_MS && st.wheel_dir == dir &&
+        st.wheel_top == top && st.wheel_surface == m->w && st.wheel_scope == m->scope)
+        st.wheel_run += st.wheel_run < 3 * ACCEL_DIV;
     else
         st.wheel_run = 1;
     st.last_wheel = now;
     st.wheel_dir = dir;
+    st.wheel_top = top;
+    st.wheel_surface = m->w;
+    st.wheel_scope = m->scope;
     unsigned run = st.wheel_run / ACCEL_DIV;
     return run < 3 ? 1 << run : ACCEL_MAX; /* 3 = log2(ACCEL_MAX) */
 }
@@ -375,6 +381,7 @@ static int load(menu_t *m, void *w) {
         if (st.reveal_surface == w) st.reveal_surface = (void *)0;
     }
     if (count != m->rows) {
+        if (st.wheel_surface == w) st.wheel_run = 0;
         prop(w, SEL, -1);
         prop(w, COUNT, m->rows);
     }
@@ -479,7 +486,8 @@ static void reveal(menu_t *m, int id, int cancel) {
         y = r.y + top;
         h = r.h;
     }
-    int want = y < top ? y : y + h > top + m->height ? y + h - m->height : top;
+    /* A tall row cannot fit: show its title consistently instead of alternating edges. */
+    int want = h > m->height || y < top ? y : y + h > top + m->height ? y + h - m->height : top;
     want = clamp_step(want, max_top(m), 0);
     if (want == top) {
         if (cancel && moving(m)) stop_scroll(m);
@@ -650,7 +658,7 @@ int ringnav_touch(void *ctx, void *event) {
     /* A tap is a fresh interaction: it cancels a pending screen-toggle pair and any spin. */
     cancel_center();
     st.home_surface = (void *)0;
-    st.last_wheel = 0;
+    st.wheel_run = 0;
     void *w = surface((void *)0, (void *)0);
     if (!result && w && load(&g_menu, w)) {
         stop_scroll(&g_menu);
@@ -697,19 +705,23 @@ int ringnav(void *ctx, void *event) {
     int result = stock_keyup(ctx, event);
     if (result || !event) {
         cancel_center();
-        /* A stock-rejected wheel event must not restart the home interval. */
-        if (!event || I(event, EVENT_KEY) == KEY_CENTER || !usable()) st.home_surface = (void *)0;
+        /* Stock debounce must not break a spin or restart the home interval. */
+        if (!event || I(event, EVENT_KEY) == KEY_CENTER || !usable()) {
+            st.wheel_run = 0;
+            st.home_surface = (void *)0;
+        }
         return result;
     }
     unsigned key = (unsigned)I(event, EVENT_KEY);
     if (key != KEY_CENTER && key != KEY_PREV && key != KEY_NEXT) return result;
     if (key == KEY_CENTER) {
-        st.last_wheel = 0;
+        st.wheel_run = 0;
         st.home_surface = (void *)0;
     } else
         cancel_center();
     if (!usable()) {
         cancel_center();
+        st.wheel_run = 0;
         st.home_surface = (void *)0;
         return result;
     }
@@ -727,12 +739,14 @@ int ringnav(void *ctx, void *event) {
     void *wm = window_manager(), *top = window_manager_get_top_window(wm);
     if (!allowed_top(top)) {
         cancel_center();
+        st.wheel_run = 0;
         st.home_surface = (void *)0;
         return result;
     }
     if (tk_strcmp(widget_get_prop_str(top, "name", ""), "home_page")) st.home_surface = (void *)0;
     if (window_manager_is_animating(wm) || window_manager_get_pointer_pressed(wm)) {
         cancel_center();
+        st.wheel_run = 0;
         return STOP;
     }
     int dir = key == KEY_NEXT ? 1 : key == KEY_PREV ? -1 : 0;
@@ -740,6 +754,7 @@ int ringnav(void *ctx, void *event) {
     if (!is_home(top, w) || w != st.home_surface) st.home_surface = (void *)0;
     if (!w || !load(&g_menu, w)) {
         cancel_center();
+        st.wheel_run = 0;
         return dir ? STOP : result;
     }
     if (st.center_timer && !pending_matches(top, &g_menu)) cancel_center();
@@ -781,7 +796,7 @@ int ringnav(void *ctx, void *event) {
         st.home_surface = w;
         st.last_home = now;
     }
-    int step = wheel_step(dir, now);
+    int step = wheel_step(&g_menu, top, dir, now);
     if (g_menu.kind == 3) {
         if (dir > 0)
             slide_menu_scroll_to_next(w);
