@@ -172,6 +172,7 @@ static void collect(void *w, entries_t *s, int depth) {
         s->at[s->n++] = w;
         return;
     }
+    /* A pages widget exposes only its active child; inactive tabs must not look tappable. */
     if (!tk_strcmp(widget_get_type(w), "pages")) {
         int active = widget_get_prop_int(w, "active", -1);
         if (active >= 0) collect(widget_get_child(w, active), s, depth + 1);
