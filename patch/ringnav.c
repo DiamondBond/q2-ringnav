@@ -167,6 +167,11 @@ static void collect(void *w, entries_t *s, int depth) {
         s->at[s->n++] = w;
         return;
     }
+    if (!tk_strcmp(widget_get_type(w), "pages")) {
+        int active = widget_get_prop_int(w, "active", -1);
+        if (active >= 0) collect(widget_get_child(w, active), s, depth + 1);
+        return;
+    }
     unsigned n = widget_count_children(w);
     for (unsigned i = 0; i < n; ++i) collect(widget_get_child(w, i), s, depth + 1);
 }
@@ -392,7 +397,7 @@ static int load_rows(menu_t *m, void *w) {
     return 1;
 }
 
-static int load(menu_t *m, void *w) {
+static int load(menu_t *m, void *w, int recall) {
     if (!load_rows(m, w)) return 0;
     m->ctx = context_now(&m->scope);
     int count = widget_get_prop_int(w, COUNT, -1);
@@ -412,7 +417,7 @@ static int load(menu_t *m, void *w) {
      * keeps its viewport, so it does not re-read the table. A non-virtual list prefers the
      * remembered first text, breaks ties by the second text and then by the remembered index,
      * and falls back to the index when no text matches. */
-    if (m->kind != 3 && count < 0) {
+    if (recall && m->kind != 3 && count < 0) {
         int p = position(m);
         int id = p < 0 ? -1 : st.pos[p].id - 1;
         unsigned hash = p < 0 ? 0 : st.pos[p].hash;
@@ -594,7 +599,7 @@ static int confirm_center(const void *info) {
     void *top = window_manager_get_top_window(window_manager());
     int valid = w && !window_manager_get_pointer_pressed(window_manager()) && !g_power_longkey &&
                 !g_ingore_bootkey_flag && !*(volatile unsigned char *)BOOT_KEY_GUARD &&
-                load(&g_menu, w) && pending_matches(top, &g_menu);
+                load(&g_menu, w, 1) && pending_matches(top, &g_menu);
     cancel_center(); /* Clear before any app callback can destroy or navigate the page. */
     if (valid) {
         void *target = g_menu.at[index_of(&g_menu, st.center_id)];
@@ -620,7 +625,7 @@ int ringnav_paint(void *w, void *canvas) {
             st.home_surface = (void *)0;
     }
     if (!w || !canvas || !kind(w) || surface((void *)0, (void *)0) != w) return result;
-    if (!load(&g_menu, w)) {
+    if (!load(&g_menu, w, 1)) {
         cancel_center();
         return result;
     }
@@ -661,7 +666,9 @@ int ringnav_paint(void *w, void *canvas) {
         unsigned shade = SHADE_COLOR;
         unsigned white = OUTLINE_COLOR;
         drawn = canvas_stroke_rounded_rect(canvas, &outer, (void *)0, &shade, RADIUS, 1) == 0;
-        if (drawn) canvas_stroke_rounded_rect(canvas, &inner, (void *)0, &white, RADIUS - 1, 1);
+        if (drawn)
+            drawn =
+                canvas_stroke_rounded_rect(canvas, &inner, (void *)0, &white, RADIUS - 1, 1) == 0;
     }
     if (!drawn) {
         canvas_set_stroke_color(canvas, SHADE_COLOR);
@@ -684,7 +691,7 @@ int ringnav_touch(void *ctx, void *event) {
     st.home_surface = (void *)0;
     st.wheel_run = 0;
     void *w = surface((void *)0, (void *)0);
-    if (!result && w && load(&g_menu, w)) {
+    if (!result && w && load(&g_menu, w, 1)) {
         stop_scroll(&g_menu);
         prop(w, TOUCH, 1);
         widget_invalidate_force(w, (void *)0);
@@ -709,7 +716,8 @@ int ringnav_dispatch(void *target, void *event) {
     if (target && event && I(event, EVENT_TYPE) == EVT_CLICK) {
         void *other = (void *)0;
         void *w = surface(target, &other);
-        if (w && load(&g_menu, w)) {
+        /* A tap owns its live row: recall could scroll/rebind that row before delivery. */
+        if (w && load(&g_menu, w, 0)) {
             int i = selects(&g_menu, target);
             if (i >= 0) {
                 stop_scroll(&g_menu); /* an explicit tap replaces any pending recall glide */
@@ -743,6 +751,12 @@ int ringnav(void *ctx, void *event) {
         st.home_surface = (void *)0;
     } else
         cancel_center();
+    if (st.center_timer && (unsigned)time_now_ms() - st.last_center >= DOUBLE_CLICK_MS) {
+        unsigned timer = st.center_timer;
+        confirm_center((void *)0);
+        timer_remove(timer);
+    }
+    /* An overdue click may change power/lock state; inspect it after its callback. */
     if (!usable()) {
         cancel_center();
         st.wheel_run = 0;
@@ -754,11 +768,6 @@ int ringnav(void *ctx, void *event) {
         (g_power_longkey || g_ingore_bootkey_flag || *(volatile unsigned char *)BOOT_KEY_GUARD)) {
         cancel_center();
         return result;
-    }
-    if (st.center_timer && (unsigned)time_now_ms() - st.last_center >= DOUBLE_CLICK_MS) {
-        unsigned timer = st.center_timer;
-        confirm_center((void *)0);
-        timer_remove(timer);
     }
     void *wm = window_manager(), *top = window_manager_get_top_window(wm);
     if (!allowed_top(top)) {
@@ -776,7 +785,7 @@ int ringnav(void *ctx, void *event) {
     int dir = key == KEY_NEXT ? 1 : key == KEY_PREV ? -1 : 0;
     void *w = surface_under(top, (void *)0, (void *)0, dir != 0);
     if (!is_home(top, w) || w != st.home_surface) st.home_surface = (void *)0;
-    if (!w || !load(&g_menu, w)) {
+    if (!w || !load(&g_menu, w, 1)) {
         cancel_center();
         st.wheel_run = 0;
         return dir ? STOP : result;

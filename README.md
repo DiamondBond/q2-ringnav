@@ -105,6 +105,7 @@ SHA-256 of the stock Shanling Q2 V1.32 firmware ZIP.
 
 ```sh
 python3 tools/build.py 'Q2 Firmware V1.32.zip' --out /tmp/q2-build
+python3 tools/test_build.py  # JPEG header checks; no emulator required
 python3 tools/test_patch.py /tmp/q2-build  # after: pip install -r requirements.txt
 ```
 
@@ -116,9 +117,11 @@ The CPU-LCD fill path runs end to end down to mocked LCD sinks, including radius
 
 The builder also rejects any `patch/contexts.inc` name that is not a window name in the stock rootfs UI assets, so an allowlist typo cannot silently disable a screen. Widget field offsets and shared ABI constants live in `patch/offsets.inc`; the payload and the test mocks read the same file.
 
-The test runner refuses a `manifest.json` whose `source_sha256` does not match the current patch sources, so a stale output directory cannot pass as the current build.
+The test runner refuses a `manifest.json` whose `source_sha256` does not match the current patch sources, and verifies the stock executable, patched executable and payload hashes against that manifest, so stale or mixed artifacts cannot pass as the current build.
 
-A MIPS instruction-count regression check verifies that filling the position table does not increase steady paint or wheel work in the current scope. For the V2.3R 20-row folder fixture, painting executes 3,369 payload instructions (unchanged from V2.2R); a warm wheel turn executes 3,653 versus 3,641 previously. Inserting an unseen scope into a full table adds 2,448 instructions over the previous implementation. These are mocked-service instruction counts, not hardware latency measurements.
+Additional regression checks cover inactive tabs nested inside a navigation surface, taps before a recreated music table has painted, power-state changes during an overdue confirmation callback, and failure of either rounded outline stroke.
+
+A MIPS instruction-count regression check verifies that filling the position table does not increase steady paint or wheel work in the current scope. In the published V2.3R build, painting the 20-row folder fixture executes 3,369 payload instructions (unchanged from V2.2R); a warm wheel turn executes 3,653 versus 3,641 previously. Inserting an unseen scope into a full table adds 2,448 instructions over the previous implementation. These are mocked-service instruction counts, not hardware latency measurements.
 
 Two fresh builds must produce identical `update.tar` files. Packaging verifies MD5 entries, unchanged kernel and rootfs metadata, and a rootfs no larger than stock.
 

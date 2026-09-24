@@ -5,11 +5,14 @@ Requires unicorn==2.1.4. Does not emulate the entire device or flash hardware.
 import json, math, pathlib, re, struct, sys
 from unicorn import Uc, UcError, UC_ARCH_MIPS, UC_MODE_MIPS32, UC_MODE_LITTLE_ENDIAN, UC_HOOK_CODE
 from unicorn.mips_const import *
-from build import segments, symbols, HOOK, HOOKS, FUNCTIONS, GLOBALS, CONTEXT_DATA, ROOT, source_sha256
+from build import segments, symbols, HOOK, HOOKS, FUNCTIONS, GLOBALS, CONTEXT_DATA, ROOT, source_sha256, sha
 B=pathlib.Path(sys.argv[1] if len(sys.argv)>1 else 'build')
 manifest=json.loads((B/'manifest.json').read_text())
 if manifest.get('source_sha256') != source_sha256():
     raise SystemExit(f'{B}/manifest.json does not match the current patch sources; rebuild into a fresh directory and pass it here')
+for name,key in (('demo','demo_sha256'),('stock-demo','stock_demo_sha256'),('patch.bin','patch_sha256')):
+    if sha((B/name).read_bytes()) != manifest.get(key):
+        raise SystemExit(f'{B/name} does not match manifest.json; rebuild into a fresh directory')
 readme=(ROOT/'README.md').read_text()
 if f'**Latest firmware: {manifest["version"]}**' not in readme or f'shows `{manifest["version"]}`' not in readme:
     raise SystemExit(f'README.md does not present {manifest["version"]} as the current firmware; update the version lines before testing')
@@ -185,7 +188,7 @@ class Machine:
             radius=self.get(sp+16); width=None if kind=='fill' else self.get(sp+20)
             self.rounded.append(dict(kind=kind,rect=tuple(signed(self.get(b+4*j)) for j in range(4)),
                 bg=signed(c),color=self.get(d),radius=radius,width=width,clip=self.clip))
-            if kind=='stroke' and self.rounded_fail:
+            if kind=='stroke' and (self.rounded_fail is True or self.rounded_fail==radius):
                 ret=2   # a backend that declines to draw, as the stock no-vgcanvas path does
             else:
                 self.word(self.lcd+(O['LCD_FILL_COLOR'] if kind=='fill' else O['LCD_STROKE_COLOR']),self.get(d))
@@ -1197,4 +1200,41 @@ for backlight in [0,1]:
 # Non-ring keys on supported pages must pass through unchanged.
 for key in [0,13,170,O['KEY_PLAY'],222,223,0xffffffff]:
     m=Machine(); m.page(); assert m.call(key)==0 and not m.moved(); passed()
+# A tap on a recreated table must not recall/rebind its target before native delivery.
+m=Machine(); w,rs,es=m.table_page(n=20); m.paint(w)
+for _ in range(12): m.call()
+w,rs,es=m.table_page(); m.rebind=lambda a,offset:m.bind(rs,offset)
+def check_tapped_row(a,b):
+    assert m.get(rs[0]+O['ROW_INDEX'])==0, 'tap rebound'
+m.on_click=check_tapped_row
+m.click(es[0])
+assert m.selected(w)==0 and m.get(w+O['TABLE_TOP'])==0 and m.clicks==[es[0]]
+assert not m.moved(); passed()
+
+# A pages widget inside a navigation surface exposes only its active child's targets.
+for active in (-1,0,1,2):
+    m=Machine(); w=m.page()
+    tabs=m.node('pages',active=active); m.word(tabs+O['W_PARENT'],w)
+    es=[m.entry(tabs) for _ in range(2)]
+    m.nodes[tabs]['children']=es; m.nodes[w]['children']=[tabs]
+    m.paint(w); m.confirm()
+    assert m.clicks==([es[active]] if active in (0,1) else []),active
+    passed()
+
+# If the white rounded stroke fails, draw the square fallback as well.
+m=Machine(); w,es=m.page_list(3); m.rounded_fail=O['RADIUS']-1
+m.paint(w)
+assert [s[5] for s in m.strokes]==[((O['SHADE_ALPHA']<<24)|O['FILL_RGB']),0xffffffff]
+assert m.get(m.lcd+O['LCD_FILL_COLOR'])==0x9abcdef0
+assert m.get(m.lcd+O['LCD_STROKE_COLOR'])==0x12345678; passed()
+
+# An overdue confirmation can change power state before the next release is processed.
+for flag in ('g_backlight_status','g_power_longkey','g_ingore_bootkey_flag'):
+    m=Machine(); w,es=m.page_list(3)
+    m.on_click=lambda a,b: m.byte(syms[flag],0 if flag=='g_backlight_status' else 1)
+    m.release(); m.now+=301
+    assert m.call(O['KEY_CENTER'],gap=0)==0,flag
+    assert m.clicks==[es[0]] and not m.timers
+    passed()
+
 print(f'{checks} MIPS execution scenarios passed; toolkit services mocked, stock lock filter executed.')

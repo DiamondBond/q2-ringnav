@@ -36,16 +36,26 @@ def check(condition, message):
     if not condition: raise ValueError(message)
 def jpeg_size(b):
     """Width and height from the JPEG SOF marker."""
+    check(b[:2] == b'\xff\xd8', 'Logo must be a JPEG')
     i = 2
-    while i + 9 <= len(b):
+    while i < len(b):
         check(b[i] == 0xFF, 'Malformed JPEG')
-        marker = b[i+1]
+        while i < len(b) and b[i] == 0xFF: i += 1
+        check(i < len(b), 'Truncated JPEG marker')
+        marker = b[i]
+        i += 1
+        if marker in (0xD9, 0xDA): break
+        if marker == 0x01 or 0xD0 <= marker <= 0xD7: continue
+        check(marker not in (0, 0xD8), 'Malformed JPEG marker')
+        check(i + 2 <= len(b), 'Truncated JPEG segment')
+        size = struct.unpack_from('>H', b, i)[0]
+        check(size >= 2 and i + size <= len(b), 'Invalid JPEG segment length')
         if marker in (0xC0,0xC1,0xC2,0xC3,0xC5,0xC6,0xC7,0xC9,0xCA,0xCB,0xCD,0xCE,0xCF):
-            h, w = struct.unpack_from('>HH', b, i+5)
+            check(size >= 8 and size == 8 + 3 * b[i+7], 'Invalid JPEG frame length')
+            h, w = struct.unpack_from('>HH', b, i+3)
+            check(w > 0 and h > 0 and b[i+7] > 0, 'Invalid JPEG dimensions/components')
             return w, h
-        if marker == 0x01 or marker == 0xD8 or 0xD0 <= marker <= 0xD7: i += 2
-        elif marker == 0xDA: break
-        else: i += 2 + struct.unpack_from('>H', b, i+2)[0]
+        i += size
     raise ValueError('No JPEG size marker')
 def symbols(p):
     out = {}
@@ -227,7 +237,6 @@ def build(zip_path, out, logo):
     replacement = b'release/bin/demo F '+b' '.join(old.groups())+b' cat '+shlex.quote(str(out/'demo')).encode()
     p = p[:old.start()]+replacement+p[old.end():]
     data = logo.read_bytes()
-    check(data[:2] == b'\xff\xd8', 'Logo must be a JPEG')
     check(jpeg_size(data) == (320, 375), 'Logo must be 320x375 like the stock splash')
     line = re.search(rb'^release/assets/default/raw/images/xx/logo\.jpg R (\d+) (\d+) (\d+) (\d+) .+$', p, re.M)
     check(line is not None, 'Missing stock logo inode')
