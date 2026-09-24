@@ -248,10 +248,10 @@ def build(zip_path, out, logo):
     epoch = struct.unpack_from('<I',sq.read_bytes(),8)[0]
     run('mksquashfs',out/'empty',newsq,'-pf',pseudo,'-noappend','-comp','lzo',
         '-b','131072','-Xcompression-level','9','-mkfs-time',epoch,*rootargs,'-processors','1','-no-progress')
-    # Every inode except demo and the logo must keep stock name/type/mtime/mode/uid/gid (size/offset fields shift).
+    # All inodes, including demo and the logo, keep name/type/mtime/mode/uid/gid (sizes/offsets shift).
     def inodes(image):
         text = subprocess.check_output(['unsquashfs','-pf','-',str(image)]).split(b'\n# START OF DATA')[0]
-        return sorted(l.split()[:6] for l in text.splitlines() if l and not l.startswith((b'#',b'release/bin/demo ')))
+        return sorted(l.split()[:6] for l in text.splitlines() if l and not l.startswith(b'#'))
     check(inodes(newsq) == inodes(sq), 'Repacked rootfs metadata differs from stock')
     blobs['recovery-update/rootfs.squashfs'] = newsq.read_bytes()
     # Stock image proves this size fits; do not enlarge beyond its padded size.

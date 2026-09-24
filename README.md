@@ -119,7 +119,7 @@ The builder also rejects any `patch/contexts.inc` name that is not a window name
 
 The test runner refuses a `manifest.json` whose `source_sha256` does not match the current patch sources, and verifies the stock executable, patched executable and payload hashes against that manifest, so stale or mixed artifacts cannot pass as the current build.
 
-Additional regression checks cover inactive tabs nested inside a navigation surface, taps before a recreated music table has painted, power-state changes during an overdue confirmation callback, and failure of either rounded outline stroke.
+Additional regression checks cover inactive tabs nested inside a navigation surface, pointer-down and painting during a tap before a recreated list has restored, saturation of large table offsets and selections without integer overflow, power-state changes during an overdue confirmation callback, and failure of either rounded outline stroke.
 
 A MIPS instruction-count regression check verifies that filling the position table does not increase steady paint or wheel work in the current scope. In the published V2.3R build, painting the 20-row folder fixture executes 3,369 payload instructions (unchanged from V2.2R); a warm wheel turn executes 3,653 versus 3,641 previously. Inserting an unseen scope into a full table adds 2,448 instructions over the previous implementation. These are mocked-service instruction counts, not hardware latency measurements.
 

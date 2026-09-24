@@ -1201,15 +1201,43 @@ for backlight in [0,1]:
 for key in [0,13,170,O['KEY_PLAY'],222,223,0xffffffff]:
     m=Machine(); m.page(); assert m.call(key)==0 and not m.moved(); passed()
 # A tap on a recreated table must not recall/rebind its target before native delivery.
-m=Machine(); w,rs,es=m.table_page(n=20); m.paint(w)
-for _ in range(12): m.call()
-w,rs,es=m.table_page(); m.rebind=lambda a,offset:m.bind(rs,offset)
-def check_tapped_row(a,b):
-    assert m.get(rs[0]+O['ROW_INDEX'])==0, 'tap rebound'
-m.on_click=check_tapped_row
-m.click(es[0])
-assert m.selected(w)==0 and m.get(w+O['TABLE_TOP'])==0 and m.clicks==[es[0]]
-assert not m.moved(); passed()
+for pointer_down in (False,True):
+    for virtual in (False,True):
+        m=Machine()
+        if virtual: w,rs,es=m.table_page(n=20)
+        else: w,es=m.page_list(20)
+        m.paint(w)
+        for _ in range(12): m.call()
+        if virtual:
+            w,rs,es=m.table_page(); m.rebind=lambda a,offset:m.bind(rs,offset)
+        else: w,es=m.page_list(20)
+        off=O['TABLE_TOP'] if virtual else O['SCROLL_Y']
+        if pointer_down:
+            m.touch()
+            assert m.get(w+off)==0 and not m.moved(), 'pointer-down recalled selection'
+            m.pressed=1; m.paint(w)
+            assert m.get(w+off)==0 and not m.moved(), 'paint recalled under pointer'
+            m.pressed=0
+        def check_tapped_row(a,b):
+            if virtual: assert m.get(rs[0]+O['ROW_INDEX'])==0, 'tap rebound'
+        m.on_click=check_tapped_row
+        m.click(es[0])
+        assert m.selected(w)==0 and m.get(w+off)==0 and m.clicks==[es[0]]
+        assert not m.moved(); passed()
+
+# Saturate before adding: large valid tables cannot wrap their viewport or logical selection.
+for pooled in (False,True):
+    m=Machine(); w,rs,es=m.table_page(n=1 if pooled else 0)
+    m.word(w+O['ROW_HEIGHT'],1); m.word(w+O['TABLE_ROWS'],0x7fffffff)
+    m.word(w+O['W_H'],1); m.word(w+O['TABLE_TOP'],0x7ffffffe)
+    if pooled:
+        m.word(rs[0]+O['ROW_INDEX'],0x7ffffffe)
+        m.word(rs[0]+O['W_Y'],0x7ffffffe); m.word(es[0]+O['W_H'],1)
+    m.paint(w)
+    for _ in range(9):
+        assert m.call(gap=50)==11 and m.get(w+O['TABLE_TOP'])==0x7ffffffe
+        if pooled: assert m.selected(w)==0x7ffffffe
+    passed()
 
 # A pages widget inside a navigation surface exposes only its active child's targets.
 for active in (-1,0,1,2):

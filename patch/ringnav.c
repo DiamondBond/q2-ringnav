@@ -117,8 +117,10 @@ static void find_surface(void *w, void **found, int *count, int *aborted, int de
 
 static int clamp_step(int offset, int maximum, int delta) {
     if (maximum < 0) maximum = 0;
-    int next = (offset < 0 ? 0 : offset > maximum ? maximum : offset) + delta;
-    return next < 0 ? 0 : next > maximum ? maximum : next;
+    offset = offset < 0 ? 0 : offset > maximum ? maximum : offset;
+    if (delta > maximum - offset) return maximum;
+    if (delta < -offset) return 0;
+    return offset + delta;
 }
 
 /* Consecutive detents closer than ACCEL_MS in one direction step further, like spinning
@@ -625,7 +627,7 @@ int ringnav_paint(void *w, void *canvas) {
             st.home_surface = (void *)0;
     }
     if (!w || !canvas || !kind(w) || surface((void *)0, (void *)0) != w) return result;
-    if (!load(&g_menu, w, 1)) {
+    if (!load(&g_menu, w, !window_manager_get_pointer_pressed(window_manager()))) {
         cancel_center();
         return result;
     }
@@ -691,7 +693,8 @@ int ringnav_touch(void *ctx, void *event) {
     st.home_surface = (void *)0;
     st.wheel_run = 0;
     void *w = surface((void *)0, (void *)0);
-    if (!result && w && load(&g_menu, w, 1)) {
+    /* Pointer-down must not recall/rebind the row that native touch is about to hit. */
+    if (!result && w && load_rows(&g_menu, w)) {
         stop_scroll(&g_menu);
         prop(w, TOUCH, 1);
         widget_invalidate_force(w, (void *)0);
@@ -839,8 +842,8 @@ int ringnav(void *ctx, void *event) {
             slide_menu_scroll_to_prev(w);
     } else if (g_menu.n) {
         int id = widget_get_prop_int(w, SEL, -1);
-        int next = clamp_step(id < 0 ? (cur >= 0 ? g_menu.id[cur] : 0) : id + dir * step,
-                              g_menu.rows - 1, 0);
+        int next = clamp_step(id < 0 ? (cur >= 0 ? g_menu.id[cur] : 0) : id, g_menu.rows - 1,
+                              id < 0 ? 0 : dir * step);
         if (next == id) return STOP;
         select(&g_menu, next);
         /* Reversing into the current viewport must cancel the previous glide away from it. */
