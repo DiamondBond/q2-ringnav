@@ -87,7 +87,10 @@ static int kind(void *w) {
     const char *t = widget_get_type(w);
     if (!tk_strcmp(t, "slide_menu")) return 3;
     if (!tk_strcmp(t, "table_client")) return 2;
-    return !tk_strcmp(t, "scroll_view") && B(w, VIEW_VERTICAL) && !B(w, VIEW_HORIZONTAL) ? 1 : 0;
+    return !tk_strcmp(t, "scroll_view") && B(w, VIEW_VERTICAL) && !B(w, VIEW_HORIZONTAL) &&
+                   !B(w, VIEW_SNAP)
+               ? 1
+               : 0;
 }
 
 /* Collect up to two candidate panes. ponytail: bounded tree walk per event; a persistent cache
@@ -588,6 +591,10 @@ static int pending_matches(void *top, menu_t *m) {
         (unsigned)widget_get_prop_int(top, CONFIRM, 0) != st.center_token ||
         (unsigned)widget_get_prop_int(m->w, CONFIRM, 0) != st.center_token)
         return 0;
+    /* Ordinary rows must still be the armed widget, even with duplicate/missing text.
+     * Virtual tables instead resolve the logical row across recycled pool widgets. */
+    if (m->kind != 2 && (unsigned)widget_get_prop_int(m->at[i], CONFIRM, 0) != st.center_token)
+        return 0;
     row_id_t r = row_id(m->at[i]);
     return r.one == st.center_hash && r.two == st.center_hash2;
 }
@@ -737,11 +744,18 @@ int ringnav_dispatch(void *target, void *event) {
 }
 
 int ringnav(void *ctx, void *event) {
+    /* The stock filter dereferences the event before returning. */
+    if (!event) {
+        cancel_center();
+        st.wheel_run = 0;
+        st.home_surface = (void *)0;
+        return 0;
+    }
     int result = stock_keyup(ctx, event);
-    if (result || !event) {
+    if (result) {
         cancel_center();
         /* Stock debounce must not break a spin or restart the home interval. */
-        if (!event || I(event, EVENT_KEY) == KEY_CENTER || !usable()) {
+        if (I(event, EVENT_KEY) == KEY_CENTER || !usable()) {
             st.wheel_run = 0;
             st.home_surface = (void *)0;
         }
@@ -822,6 +836,7 @@ int ringnav(void *ctx, void *event) {
         if (st.center_timer) {
             prop(top, CONFIRM, (int)st.center_token);
             prop(w, CONFIRM, (int)st.center_token);
+            if (g_menu.kind != 2) prop(g_menu.at[cur], CONFIRM, (int)st.center_token);
         } else
             cancel_center(); /* Allocation failure consumes the press without a click. */
         return STOP;

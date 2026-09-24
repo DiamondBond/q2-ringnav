@@ -326,10 +326,18 @@ m.top=m.node('window','artistinfo_page',[pages]); assert m.call()==11 and m.move
 m.nodes[hidden]['visible']=1
 assert m.call()==11 and m.moved()[0][1]==shown; passed()
 m.top=m.node('window','sysset_page',[hidden,shown]); assert m.call()==11 and m.moved()[-1][1]==hidden; passed()
-# A horizontal scroll view is not a navigation pane and cannot make a page ambiguous.
-m=Machine(); vert=m.node(); horiz=m.node(); m.word(horiz+O['VIEW_HORIZONTAL'],1)
-m.top=m.node('window','sysset_page',[horiz,vert])
-assert m.call()==11 and m.moved()[0][1]==vert; passed()
+# Run the stock setters so incorrect shared offsets cannot make the mocks agree with a bug.
+for setter,field in (('scroll_view_set_xslidable','VIEW_HORIZONTAL'),
+                     ('scroll_view_set_yslidable','VIEW_VERTICAL'),
+                     ('scroll_view_set_snap_to_page','VIEW_SNAP')):
+    m=Machine(); vert=m.node(); excluded=m.node()
+    m.word(excluded+0x74,syms['g_scroll_view_vtable'])
+    value=0 if field=='VIEW_VERTICAL' else 1
+    assert m.call(address=syms[setter],args=(excluded,value,0,0))==0
+    assert m.u.mem_read(excluded+O[field],1)==bytes([value])
+    m.top=m.node('window','sysset_page',[excluded,vert])
+    assert m.call()==11 and m.moved()[0][1]==vert
+    passed()
 # Two navigable panes: only the pane that already holds the selection is used.
 m=Machine(); a=m.node(); b=m.node(); m.word(a+O['W_H'],96); m.word(b+O['W_H'],96)
 for s in (a,b):
@@ -802,6 +810,25 @@ for change in ('top','surface','scope','selection','count','text','hidden','disa
     elif change=='boot': m.byte(O['BOOT_KEY_GUARD'],1)
     else: m.nodes[m.top if change=='reused_top' else w].pop('_ringnav_confirm')
     m.advance(300); assert not m.clicks and not m.timers,change; passed()
+# Non-virtual rows cannot inherit confirmation merely by sharing an index and text.
+for kind in ('scroll_view','slide_menu'):
+    for text in ('','Same title'):
+        for reused in (False,True):
+            m=Machine(); w,es=m.page_list(3)
+            m.nodes[w]['type']=kind
+            if kind=='slide_menu': m.word(w+O['SLIDE_INDEX'],0)
+            m.nodes[es[0]]['text']=text
+            m.release()
+            if reused:
+                m.nodes[es[0]].pop('_ringnav_confirm',None)
+            else:
+                replacement=m.entry(w)
+                m.nodes[replacement]['text']=text
+                m.nodes[w]['children'][0]=replacement
+            m.advance(300)
+            assert not m.clicks and not m.timers,(kind,text,reused)
+            passed()
+
 # A recycled table pool resolves the original logical index from the live row mapping.
 m=Machine(); w,rs,es=m.table_page(); m.release()
 m.word(rs[0]+O['ROW_INDEX'],1); m.word(rs[1]+O['ROW_INDEX'],0)
@@ -1264,5 +1291,10 @@ for flag in ('g_backlight_status','g_power_longkey','g_ingore_bootkey_flag'):
     assert m.call(O['KEY_CENTER'],gap=0)==0,flag
     assert m.clicks==[es[0]] and not m.timers
     passed()
+
+# Reject a missing key event before calling the stock filter, cancelling pending input.
+m=Machine(); w,es=m.page_list(3); m.release()
+assert m.call(args=(0,0,0,0),gap=0)==0
+m.advance(300); assert not m.clicks and not m.timers; passed()
 
 print(f'{checks} MIPS execution scenarios passed; toolkit services mocked, stock lock filter executed.')

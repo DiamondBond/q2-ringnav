@@ -19,8 +19,9 @@
 #define SCROLL_X 0x80           /* scroll_view horizontal offset */
 #define TABLE_TOP 0x80          /* table_client viewport top (same slot) */
 #define SCROLL_Y 0x84           /* scroll_view viewport top */
-#define VIEW_VERTICAL 0x91
-#define VIEW_HORIZONTAL 0x92
+#define VIEW_HORIZONTAL 0x90    /* scroll_view xslidable */
+#define VIEW_VERTICAL 0x91      /* scroll_view yslidable */
+#define VIEW_SNAP 0x92          /* scroll_view snap_to_page */
 #define TABLE_ANIMATOR 0xd0
 #define VIEW_ANIMATOR 0xe8
 #define EVENT_TYPE 0x00
