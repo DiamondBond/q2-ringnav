@@ -945,10 +945,7 @@ int ringnav(void *ctx, void *event) {
             cancel_center(); /* Allocation failure consumes the press without a click. */
         return STOP;
     }
-    if (st.touch_mode) {
-        st.touch_mode = 0;
-        widget_invalidate_force(w, (void *)0);
-    }
+    st.touch_mode = 0;
     if (is_home(top, w)) {
         home_step(w, dir, now);
         widget_invalidate_force(w, (void *)0);
@@ -967,6 +964,7 @@ int ringnav(void *ctx, void *event) {
         if (next == 0 || next == g_menu.rows - 1) st.wheel_run = 0;
         if (next == id) {
             stop_scroll(&g_menu);
+            widget_invalidate_force(w, (void *)0); /* a wheel wake still clears touch hiding */
             return STOP;
         }
         select(&g_menu, next);

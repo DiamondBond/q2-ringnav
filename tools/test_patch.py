@@ -346,6 +346,14 @@ class Machine:
             self.nodes[r]['children']=[e]; self.word(r+O['W_PARENT'],w)
         self.bind(rs)
         return w,rs,es
+    def list_surface(self,virtual,n=20,rebind=True):
+        """A plain list of n 48px rows or a four-row virtual table; optionally rebound."""
+        if not virtual:
+            w,es=self.page_list(n,extent=n*48)
+            return w,None
+        w,rs,es=self.table_page()
+        if rebind: self.rebind=lambda a,offset: self.bind(rs,offset)
+        return w,rs
     def moved(self): return [x for x in self.calls if x[0] in ('scroll_view_set_offset','table_client_set_yoffset','scroll_view_scroll_delta_to','table_client_scroll_to','slide_menu_scroll_to_next','slide_menu_scroll_to_prev','widget_animator_scroll_set_params')]
     def dispatched(self): return [x for x in self.calls if x[0]=='stock_dispatch']
 
@@ -1499,9 +1507,7 @@ for virtual in (False,True):
 for virtual in (False,True):
     for click_only in (False,True):
         m=Machine()
-        if virtual:
-            w,rs,es=m.table_page(); m.rebind=lambda a,offset: m.bind(rs,offset)
-        else: w,es=m.page_list(20)
+        w,rs=m.list_surface(virtual)
         m.paint(w); assert m.rounded
         if click_only: m.click(m.node('button'))
         else: m.touch()
@@ -1517,9 +1523,7 @@ for virtual in (False,True):
         old=m.top; m.page('playing_page'); m.touch(); m.call()
         m.top=old; m.paint(w); assert not m.rounded and not m.strokes
         # Returning to a recreated list preserves remembered selection, still without drawing.
-        if virtual:
-            w,rs,es=m.table_page(); m.rebind=lambda a,offset: m.bind(rs,offset)
-        else: w,es=m.page_list(20)
+        w,rs=m.list_surface(virtual)
         m.paint(w); assert m.selected(w)==3 and not m.rounded and not m.strokes
         m.confirm(); m.paint(w); assert m.rounded  # centre-generated click stays visible
         m.touch(); m.pressed=1; m.call(); m.paint(w)
@@ -1529,8 +1533,7 @@ for virtual in (False,True):
 # Boundary wheel turns restore drawing and cancel momentum even without selection movement.
 for virtual in (False,True):
     m=Machine()
-    if virtual: w,rs,es=m.table_page()
-    else: w,es=m.page_list(20)
+    w,rs=m.list_surface(virtual,rebind=False)
     m.paint(w); m.touch()
     anim=O['TABLE_ANIMATOR'] if virtual else O['VIEW_ANIMATOR']
     m.word(w+anim,0x1234)
@@ -1547,10 +1550,8 @@ m.call(); m.paint(w); assert m.rounded; passed()
 for virtual in (False,True):
     for count in (16,17):
         m=Machine()
-        if virtual:
-            w,rs,es=m.table_page(); m.word(w+O['TABLE_ROWS'],count)
-            m.rebind=lambda a,offset: m.bind(rs,offset)
-        else: w,es=m.page_list(count,extent=count*48)
+        w,rs=m.list_surface(virtual,n=count)
+        if virtual: m.word(w+O['TABLE_ROWS'],count)
         for _ in range(7): m.call(gap=100)
         # Sixteen rows stay at one row per tick; seventeen ramp straight into the end row.
         assert m.selected(w)==(7 if count==16 else 16)
