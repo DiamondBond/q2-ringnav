@@ -28,7 +28,7 @@ print('JPEG header regression checks passed.')
 
 def validate_assets(directory):
     import json, subprocess
-    from build import sha, run, fileoff
+    from build import sha, run, fileoff, VERSIONS
     from compact import AUDIT, PITCH, decode, patch_asset, patch_code
     manifest = json.loads((directory/'manifest.json').read_text())
     compact = manifest['variant'] == 'compact'
@@ -41,7 +41,7 @@ def validate_assets(directory):
             off = fileoff(stock, int(address, 16))
             if not compact:
                 assert demo[off:off+4] == stock[off:off+4]
-    assert (b'V3.1C\0' if compact else b'V3.1R\0') in demo
+    assert VERSIONS[manifest['variant']].encode()+b'\0' in demo
     changed = manifest['changed_assets']
     assert set(changed) == ({'release/assets/default/raw/ui/'+p for p in AUDIT['assets']} if compact else set())
     def read(image, rel):

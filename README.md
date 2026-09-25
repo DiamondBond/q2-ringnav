@@ -4,7 +4,7 @@ Firmware mod for the Shanling Q2 that lets you use the scroll wheel to move thro
 
 The touchscreen still works normally. Outside supported menus, the wheel still controls volume.
 
-**V3.1 build variants: V3.1R (normal), V3.1C (compact)**
+**V3.2 build variants: V3.2R (normal), V3.2C (compact)**
 
 [**Download the latest release**](https://github.com/DiamondBond/q2-ringnav/releases/latest)
 
@@ -16,7 +16,7 @@ Make sure the Q2 is charged before updating, and don't remove the microSD card w
 2. Unzip it and copy `update.tar` to the root of your microSD card.
 3. On the Q2, go to **System settings → System Update → TF card update**.
 4. Confirm the update and wait for the player to restart.
-5. Check **About** and make sure it shows `V3.1R` for normal or `V3.1C` for compact.
+5. Check **About** and make sure it shows `V3.2R` for normal or `V3.2C` for compact.
 
 To restore stock firmware via the UI; flash the [Shanling Q2 official firmware](https://en.shanling.com/download/150) through **System settings → System Update → TF card update**.
 
@@ -28,8 +28,8 @@ If the UI is not working, use [Shanling's recovery package](https://drive.google
 
 ## Variants
 
-`Q2.Firmware.V3.1.zip` keeps the normal UI and existing controls, including long Return → Home.
-`Q2.Firmware.V3.1-compact.zip` hides the primary toolbar in Folder and Local Songs browsing and
+`Q2.Firmware.V3.2.zip` keeps the normal UI and existing controls, including long Return → Home.
+`Q2.Firmware.V3.2-compact.zip` hides the primary toolbar in Folder and Local Songs browsing and
 uses 65-pixel rows: ordinary lists fit four complete rows with stock fonts. Separate action
 bars, Play All/sort, tabs, editing controls and album grid modes remain; these can show fewer
 entries. Settings, online services, Now Playing, home and dialogs keep their stock layouts.
@@ -59,6 +59,8 @@ During wheel/centre use, the selected item gets a single rounded translucent-whi
 If you find a menu where something behaves strangely, please open an issue and say which screen you were on and what you did.
 
 ## Changelog
+
+- **V3.2R / V3.2C**: Version bump over V3.1; navigation, compact browsing and all other behavior are unchanged. The compact audit and release tooling were trimmed.
 
 - **V3.1R / V3.1C**: Shared normal and compact builds, compact local lists and long Return to Now Playing, and a reproducible dual-variant release procedure.
 
@@ -160,12 +162,12 @@ Keep the proprietary stock ZIP local. Use the Python environment with `requireme
 installed for these commands:
 
 ```sh
-python3 tools/release.py package 'Q2 Firmware V1.32.zip' --out /tmp/q2-v31-release
+python3 tools/release.py package 'Q2 Firmware V1.32.zip' --out /tmp/q2-v32-release
 python3 tools/test_release.py
 # Create or update the release with both validated ZIPs and verify remote bytes.
-python3 tools/release.py upload /tmp/q2-v31-release
+python3 tools/release.py upload /tmp/q2-v32-release
 # Same, then publish after verification.
-python3 tools/release.py upload /tmp/q2-v31-release --publish
+python3 tools/release.py upload /tmp/q2-v32-release --publish
 ```
 
 Packaging requires a fresh output directory, builds each variant twice, runs the shared MIPS
