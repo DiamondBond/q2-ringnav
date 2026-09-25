@@ -13,11 +13,9 @@ import tempfile
 import zipfile
 from build import ROOT, VERSIONS, ZIP_SHA, DEMO_SHA, build, check, run, sha, source_sha256
 
-TAG = '3.2R'
-ASSETS = {'normal': 'Q2.Firmware.V3.2.zip', 'compact': 'Q2.Firmware.V3.2-compact.zip'}
-NOTES = '''- Q2.Firmware.V3.2.zip: normal UI and controls (V3.2R). Q2.Firmware.V3.2-compact.zip: compact local browsing (V3.2C).
-- Compact hides the primary toolbar in Folder and Local Songs, fits four complete rows in ordinary lists with stock fonts, and keeps the stock artwork at natural size with an even eight-pixel inset.
-- Wheel navigation, position memory, the selection outline and saved settings are shared; compact long Return opens Now Playing, short Return keeps stock Back.
+TAG = '3.3R'
+ASSETS = {'normal': 'Q2.Firmware.V3.3.zip', 'compact': 'Q2.Firmware.V3.3-compact.zip'}
+NOTES = '''- Compact: a single Return press on Now Playing goes back again. The stock hold-release latch is cleared on that page instead of swallowing the release and forcing a second press.
 '''
 
 

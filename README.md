@@ -4,7 +4,7 @@ Firmware mod for the Shanling Q2 that lets you use the scroll wheel to move thro
 
 The touchscreen still works normally. Outside supported menus, the wheel still controls volume.
 
-**Build variants: V3.2R (normal), V3.2C (compact)**
+**Build variants: V3.3R (normal), V3.3C (compact)**
 
 [**Download the latest release**](https://github.com/DiamondBond/q2-ringnav/releases/latest)
 
@@ -16,7 +16,7 @@ Make sure the Q2 is charged before updating, and don't remove the microSD card w
 2. Unzip it and copy `update.tar` to the root of your microSD card.
 3. On the Q2, go to **System settings → System Update → TF card update**.
 4. Confirm the update and wait for the player to restart.
-5. Check **About** and make sure it shows `V3.2R` for normal or `V3.2C` for compact.
+5. Check **About** and make sure it shows `V3.3R` for normal or `V3.3C` for compact.
 
 To restore stock firmware via the UI; flash the [Shanling Q2 official firmware](https://en.shanling.com/download/150) through **System settings → System Update → TF card update**.
 
@@ -28,8 +28,8 @@ If the UI is not working, use [Shanling's recovery package](https://drive.google
 
 ## Variants
 
-`Q2.Firmware.V3.2.zip` keeps the normal UI and existing controls, including long Return → Home.
-`Q2.Firmware.V3.2-compact.zip` hides the primary toolbar in Folder and Local Songs browsing and
+`Q2.Firmware.V3.3.zip` keeps the normal UI and existing controls, including long Return → Home.
+`Q2.Firmware.V3.3-compact.zip` hides the primary toolbar in Folder and Local Songs browsing and
 uses 72-pixel rows with the stock artwork drawn at its natural size and an even eight-pixel
 inset: ordinary lists fit four complete rows with stock fonts. Separate action bars, Play All/sort, tabs, editing controls and album grid modes remain;
 these can show fewer entries. Settings, online services, Now Playing, home and dialogs keep
@@ -60,6 +60,8 @@ During wheel/centre use, the selected item gets a single rounded translucent-whi
 If you find a menu where something behaves strangely, please open an issue and say which screen you were on and what you did.
 
 ## Changelog
+
+- **V3.3R / V3.3C**: Compact returns from Now Playing with a single Return press again; the stock hold-release latch is cleared on that page instead of swallowing the release and forcing a second press.
 
 - **V3.2R / V3.2C**: Compact rows now fill the client area with 72-pixel rows, so the stock artwork keeps its natural size with an even eight-pixel inset instead of being scaled down. Navigation and all other behavior are unchanged.
 
@@ -136,14 +138,14 @@ SHA-256 of the stock Shanling Q2 V1.32 firmware ZIP.
 ```sh
 python3 tools/build.py 'Q2 Firmware V1.32.zip' --out /tmp/q2-build
 python3 tools/build.py 'Q2 Firmware V1.32.zip' --out /tmp/q2-compact --compact
-python3 tools/build.py 'Q2 Firmware V1.32.zip' --out /tmp/q2-dev --compact --dev  # V3.3C test build
+python3 tools/build.py 'Q2 Firmware V1.32.zip' --out /tmp/q2-dev --compact --dev  # V3.4C test build
 python3 tools/test_build.py  # JPEG header checks; no emulator required
 python3 tools/test_build.py 'Q2 Firmware V1.32.zip'  # optional packaging/reproducibility checks
 python3 tools/test_patch.py /tmp/q2-build  # after: pip install -r requirements.txt
 ```
 
-`--dev` tags a build with the temporary higher version `V3.3R`/`V3.3C` so a test unit is
-distinguishable from the released `V3.2R`/`V3.2C` it replaces. It applies to that build only:
+`--dev` tags a build with the temporary higher version `V3.4R`/`V3.4C` so a test unit is
+distinguishable from the released `V3.3R`/`V3.3C` it replaces. It applies to that build only:
 the release procedure never passes `--dev`, and the manifest records `dev: true`.
 
 The suite executes the actual patched MIPS payload and stock key/touch filters. UI services are mocked; carousel checks execute native animator parameter writes and stock completion, with a deterministic animation scheduler, and audit the stock creation path. Separate scenarios execute the stock canvas clip/color/rectangle code and the stock rounded fill/stroke entry points down to mocked LCD and vgcanvas sinks.
@@ -170,12 +172,12 @@ Keep the proprietary stock ZIP local. Use the Python environment with `requireme
 installed for these commands:
 
 ```sh
-python3 tools/release.py package 'Q2 Firmware V1.32.zip' --out /tmp/q2-v32-release
+python3 tools/release.py package 'Q2 Firmware V1.32.zip' --out /tmp/q2-v33-release
 python3 tools/test_release.py
 # Create or update the release with both validated ZIPs and verify remote bytes.
-python3 tools/release.py upload /tmp/q2-v32-release
+python3 tools/release.py upload /tmp/q2-v33-release
 # Same, then publish after verification.
-python3 tools/release.py upload /tmp/q2-v32-release --publish
+python3 tools/release.py upload /tmp/q2-v33-release --publish
 ```
 
 Packaging requires a fresh output directory, builds each variant twice, runs the shared MIPS

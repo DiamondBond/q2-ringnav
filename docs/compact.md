@@ -1,6 +1,6 @@
 # Compact audit and device checks
 
-V3.2R and V3.2C share one navigation payload. `--compact` enables a single extra
+V3.3R and V3.3C share one navigation payload. `--compact` enables a single extra
 payload function and build-time edits in `tools/compact.py`; normal receives no
 compact executable sites or UI assets. `patch/compact.json` records the original
 asset hashes and full MIPS instructions. The builder also pins the complete stock
