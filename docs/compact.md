@@ -1,4 +1,4 @@
-# Compact audit and device acceptance
+# Compact audit and device checks
 
 V3.1R and V3.1C share one navigation payload. `--compact` enables a single extra
 payload function and build-time edits in `tools/compact.py`; normal receives no
@@ -38,10 +38,9 @@ with `playing_page` and `{0, 0, 0xff, 2}`. The `0xff` context skips player_start
 The stock key-up filter consumes the following release. No short-Return callback
 or other long-key destination changes.
 
-## Device checklist (required for both exact ZIPs before publication)
+## Device checklist
 
-Record results against the generated ZIP checksums. The generated acceptance JSON
-starts with every check false; mark a category true only after completing it.
+Run this over both builds when validating a release.
 
 - **readability**: Browse Folder and Local Songs, artists, genres, albums, album
   tracks, artist tracks/albums and playlists. Check all four complete ordinary

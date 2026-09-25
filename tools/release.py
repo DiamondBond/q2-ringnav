@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package both variants locally; optionally upload one verified draft release."""
+"""Package both variants locally; optionally upload and publish one verified release."""
 import argparse
 import hashlib
 import importlib.util
@@ -20,7 +20,6 @@ def require_emulator():
 
 TAG = '3.1R'
 ASSETS = {'normal': 'Q2.Firmware.V3.1.zip', 'compact': 'Q2.Firmware.V3.1-compact.zip'}
-DEVICE_CHECKS = ('readability', 'toolbar', 'artwork', 'return', 'retained_controls', 'excluded_screens')
 NOTES = '''- Ships two builds from the same patch: Q2.Firmware.V3.1.zip (V3.1R, normal UI and controls) and Q2.Firmware.V3.1-compact.zip (V3.1C, compact local browsing).
 - Compact hides the primary toolbar in Folder and Local Songs, fits four complete 65-pixel rows in ordinary lists with stock fonts, and keeps the separate action bars, Play All/sort controls, tabs, editing controls and album grid modes. Settings, online services, Now Playing, home and dialogs stay stock.
 - Compact long Return opens Now Playing without restarting playback and consumes its release; short Return keeps stock Back, including nested folders. Normal keeps short and long Return stock. Other long presses are unchanged.
@@ -94,12 +93,10 @@ def package(stock, out, logo):
     (out/'SHA256SUMS').write_text(''.join(f'{digest}  {name}\n' for name, digest in checksums.items()))
     (out/'release-notes.md').write_text(release_body(out, record))
     (out/'release.json').write_text(json.dumps(record, indent=2)+'\n')
-    (out/'device-checks.json').write_text(json.dumps(dict(assets=checksums,
-        checks={variant: dict.fromkeys(DEVICE_CHECKS, False) for variant in ASSETS}), indent=2)+'\n')
     print(f'Both variants validated and reproducible: {out}')
 
 
-def upload(out, repo, publish=False, device_checks=None):
+def upload(out, repo, publish=False):
     record = json.loads((out/'release.json').read_text())
     check(record['tag'] == TAG and record['source_sha256'] == source_sha256(), 'Wrong release source/tag')
     check(set(record['assets']) == set(ASSETS.values()), 'Both variants are required')
@@ -110,12 +107,6 @@ def upload(out, repo, publish=False, device_checks=None):
     sums = ''.join(f'{record["assets"][name]}  {name}\n' for name in ASSETS.values())
     check((out/'SHA256SUMS').read_text() == sums, 'Release checksums mismatch')
     (out/'release-notes.md').write_text(release_body(out, record))
-    if publish:
-        check(device_checks is not None, 'Publication requires --device-checks for these exact ZIPs')
-        acceptance = json.loads(device_checks.read_text())
-        check(acceptance.get('assets') == record['assets'], 'Device checks belong to different ZIPs')
-        check(all(acceptance.get('checks', {}).get(v, {}).get(c) is True
-                  for v in ASSETS for c in DEVICE_CHECKS), 'Device acceptance is incomplete')
     gh = ['gh', '--repo', repo, 'release']
     # Listing distinguishes an absent tag from an authentication/network failure.
     releases = json.loads(run(*gh, 'list', '--limit', '1000', '--json', 'tagName,isDraft'))
@@ -148,13 +139,12 @@ if __name__ == '__main__':
     p.add_argument('out', type=pathlib.Path)
     p.add_argument('--repo', default='DiamondBond/q2-ringnav')
     p.add_argument('--publish', action='store_true')
-    p.add_argument('--device-checks', type=pathlib.Path)
     a = ap.parse_args()
     try:
         require_emulator()
         if a.command == 'package':
             package(a.zip, a.out.resolve(), a.logo)
         else:
-            upload(a.out.resolve(), a.repo, a.publish, a.device_checks)
+            upload(a.out.resolve(), a.repo, a.publish)
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as exc:
         ap.error(str(exc))

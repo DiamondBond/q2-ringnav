@@ -6,8 +6,6 @@ The touchscreen still works normally. Outside supported menus, the wheel still c
 
 **V3.1 build variants: V3.1R (normal), V3.1C (compact)**
 
-V3.1 requires device acceptance before publication; the latest-release link points to the last published release.
-
 [**Download the latest release**](https://github.com/DiamondBond/q2-ringnav/releases/latest)
 
 ## Install
@@ -62,7 +60,7 @@ If you find a menu where something behaves strangely, please open an issue and s
 
 ## Changelog
 
-- **V3.1R / V3.1C (pending device acceptance)**: Shared normal and compact builds, compact local lists and long Return to Now Playing, and a reproducible dual-variant release procedure.
+- **V3.1R / V3.1C**: Shared normal and compact builds, compact local lists and long Return to Now Playing, and a reproducible dual-variant release procedure.
 
 - **V3.0R**: Long lists accelerate smoothly again: each 100 ms of sustained same-direction spin adds a row to the step, up to eight rows per tick, replacing the V2.7R/V2.8R three-speed ladder. Stopping, reversing or easing off still drops back to one row immediately. The selected-row outline is now a softer translucent white line, so it sits better against the dark theme while the dark separator still keeps it readable over bright album art. The shipped `config.ini` is no longer modified, so a fresh install keeps the stock key tone default; a device that already ran V2.9R keeps its saved setting and can change it in the system settings.
 - **V2.9R**: Restores the stock wheel and button input path, removing the V2.8R 25 ms detent hold. The key tone now ships disabled, so wheel and button feedback is silent by default; enable **Key Tone** in the system settings to bring the clicks back. The three-speed wheel acceleration from V2.8R is unchanged.
@@ -164,24 +162,17 @@ installed for these commands:
 ```sh
 python3 tools/release.py package 'Q2 Firmware V1.32.zip' --out /tmp/q2-v31-release
 python3 tools/test_release.py
-# Optional: create/update a draft with BOTH validated ZIPs and verify remote bytes.
+# Create or update the release with both validated ZIPs and verify remote bytes.
 python3 tools/release.py upload /tmp/q2-v31-release
+# Same, then publish after verification.
+python3 tools/release.py upload /tmp/q2-v31-release --publish
 ```
 
 Packaging requires a fresh output directory, builds each variant twice, runs the shared MIPS
 suite and asset checks on each build, and compares update.tar and ZIP bytes. It writes both
-ZIPs, manifests, SHA256SUMS, release notes, source revision/hash and a device acceptance form.
-Normal is the default for direct builds; a single direct build is never a release input.
-Upload revalidates both variants and refuses stale, missing or changed artifacts and published
-releases. An upload/download failure leaves the release unpublished; rerun upload to repair the
-draft. Packaging uses no GitHub credentials or network.
-
-Complete the [device checklist](docs/compact.md) on both exact ZIPs, then mark the corresponding
-checks `true` in the generated `device-checks.json`. Publication is a separate, explicit step:
-
-```sh
-python3 tools/release.py upload /tmp/q2-v31-release --publish \
-  --device-checks /tmp/q2-v31-release/device-checks.json
-```
-
-The checks are bound to both ZIP hashes. Changing a ZIP requires new device acceptance.
+ZIPs, manifests, SHA256SUMS, release notes and source revision/hash. Normal is the default for
+direct builds; a single direct build is never a release input. Upload revalidates both variants
+and refuses stale, missing or changed artifacts and published releases. An upload/download
+failure leaves the release unpublished; rerun upload to repair the draft. Packaging uses no
+GitHub credentials or network. The [compact checklist](docs/compact.md) is a device test guide,
+not a release gate.

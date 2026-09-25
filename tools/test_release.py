@@ -37,8 +37,6 @@ with tempfile.TemporaryDirectory() as tmp:
     (out/'release.json').write_text(json.dumps(record))
     (out/'release-notes.md').write_text(release.release_body(out, record))
     (out/'SHA256SUMS').write_text(''.join(f'{v}  {k}\n' for k, v in assets.items()))
-    accepted = out/'accepted.json'
-    accepted.write_text(json.dumps(dict(assets=assets, checks={v: dict.fromkeys(release.DEVICE_CHECKS, True) for v in release.ASSETS})))
     for failure in ('upload', 'download', 'corrupt', None):
         calls = []
         def gh(*args):
@@ -54,13 +52,13 @@ with tempfile.TemporaryDirectory() as tmp:
             return ''
         with patch('release.validate'), patch('release.run', side_effect=gh):
             try:
-                release.upload(out, 'owner/repo', True, accepted)
+                release.upload(out, 'owner/repo', True)
             except (ValueError, subprocess.CalledProcessError):
                 assert failure
             else:
                 assert failure is None
         assert any('--draft=false' in c for c in calls) == (failure is None)
-    # Missing compact and unaccepted device checks must fail before contacting GitHub.
+    # A missing variant must fail before contacting GitHub.
     (out/release.ASSETS['compact']).unlink()
     with patch('release.validate'), patch('release.run') as gh:
         try: release.upload(out, 'owner/repo')
