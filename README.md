@@ -1,3 +1,5 @@
+![Q2 RingNav: compact list view for Shanling Q2](assets/sloppa_banner.png)
+
 # Shanling Q2 Scroll Wheel Navigation
 
 Firmware mod for the Shanling Q2 that lets you use the scroll wheel to navigate supported menus and press the centre button to select items.
