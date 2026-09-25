@@ -951,19 +951,19 @@ for start in (0,0xfffffff0):
             m=Machine(); m.now=start; w=m.page('home_page','slide_menu')
             assert m.call(key,gap=0)==11
             a,origin,goal,duration=slide(m,w)
-            assert (origin,goal,duration)==(0,-direction*240,150)
+            assert (origin,goal,duration)==(0,-direction*240,200)
             for i in range(1,count):
                 m.advance(30); live=signed(m.get(w+O['SLIDE_OFFSET']))
                 assert m.call(key,gap=0)==11
-                assert slide(m,w)==(a,live,-direction*240*(i+1),75)
-            m.advance(75)
+                assert slide(m,w)==(a,live,-direction*240*(i+1),120)
+            m.advance(120)
             assert not m.slides and m.get(w+O['SLIDE_ANIMATOR'])==0
             assert m.get(w+O['SLIDE_OFFSET'])==0
             assert m.get(w+O['SLIDE_INDEX'])==(direction*count)%7
             assert m.nodes[m.nodes[w]['children'][(direction*count)%7]]['focused']==1
             m.advance(126); m.call(key,gap=0)
-            assert slide(m,w)[3]==150
-            m.advance(150); settled=m.get(w+O['SLIDE_INDEX']); m.advance(500)
+            assert slide(m,w)[3]==200
+            m.advance(200); settled=m.get(w+O['SLIDE_INDEX']); m.advance(500)
             assert m.get(w+O['SLIDE_INDEX'])==settled and not m.slides
             passed()
 # Reversal at either speed starts at the live position and actually travels backward,
@@ -976,13 +976,13 @@ for fast in (False,True):
         m.advance(30); live=signed(m.get(w+O['SLIDE_OFFSET']))
         a=m.get(w+O['SLIDE_ANIMATOR']); m.call(reverse,gap=0)
         active,origin,goal,duration=slide(m,w)
-        assert active==a and origin==live and duration==150 and (goal-live)*sign>0
-        m.advance(150)
+        assert active==a and origin==live and duration==200 and (goal-live)*sign>0
+        m.advance(200)
         assert m.get(w+O['SLIDE_INDEX'])==(-goal//240)%7 and not m.slides
         assert m.nodes[m.nodes[w]['children'][(-goal//240)%7]]['focused']==1
         passed()
 # Exact fast-window boundary, stock rejection, and interaction resets.
-for gap,want in ((200,75),(201,150)):
+for gap,want in ((200,120),(201,200)):
     m=Machine(); w=m.page('home_page','slide_menu'); m.call(gap=0); m.call(gap=gap)
     assert slide(m,w)[3]==want; passed()
 for action in ('touch','center','click','leave','animating','pressed','unusable','missing'):
@@ -995,10 +995,10 @@ for action in ('touch','center','click','leave','animating','pressed','unusable'
         m.byte(syms['g_backlight_status'],0); m.call(gap=20); m.byte(syms['g_backlight_status'],1)
     elif action=='missing': m.call(args=(m.wm,0,0,0),gap=20)
     else: setattr(m,action,1); m.call(gap=20); setattr(m,action,0)
-    assert m.call(gap=1)==11 and slide(m,w)[3]==150; passed()
+    assert m.call(gap=1)==11 and slide(m,w)[3]==200; passed()
 m=Machine(); w=m.page('home_page','slide_menu'); m.call(gap=0)
 m.byte(0xa37c89,1); assert m.call(O['KEY_PREV'],gap=20,debounce=True)==11
-assert not m.moved(); m.call(gap=20); assert slide(m,w)[3]==75; passed()
+assert not m.moved(); m.call(gap=20); assert slide(m,w)[3]==120; passed()
 for count in (0,1):
     m=Machine(); w=m.page('home_page','slide_menu'); m.nodes[w]['children']=m.nodes[w]['children'][:count]
     for key in (O['KEY_NEXT'],O['KEY_PREV']):
@@ -1013,7 +1013,7 @@ for count in (0,1):
     assert not m.slides and not m.get(w+O['SLIDE_ANIMATOR'])
     m.advance(500); assert not m.get(w+O['SLIDE_OFFSET']); passed()
 m=Machine(); w=m.page('home_page','slide_menu'); m.call(gap=0)
-m.nodes[w]['children']=[]; m.advance(150)
+m.nodes[w]['children']=[]; m.advance(200)
 assert not m.slides and not m.get(w+O['SLIDE_ANIMATOR']); passed()
 # Animator and callback allocation failures settle through stock selection.
 for failure in ('slide_fail','slide_on_fail'):
@@ -1022,7 +1022,7 @@ for failure in ('slide_fail','slide_on_fail'):
     assert m.get(w+O['SLIDE_INDEX'])==1 and not m.get(w+O['SLIDE_ANIMATOR'])
     assert not m.slides and not m.slide_callbacks
     assert m.nodes[m.nodes[w]['children'][1]]['focused']==1
-    setattr(m,failure,False); m.call(gap=20); assert slide(m,w)[3]==150; passed()
+    setattr(m,failure,False); m.call(gap=20); assert slide(m,w)[3]==200; passed()
 # Centre arms the intended final icon while its slide is still unfinished.
 m=Machine(); w=m.page('home_page','slide_menu')
 for _ in range(5): m.call(gap=20)
@@ -1463,7 +1463,7 @@ for home in (False,True):
     m.call(address=HOOKS['widget_dispatch'][0],args=(es[0 if home else 2],m.event,0,0),
            event_type=O['EVT_CLICK'],gap=50)
     assert m.call(gap=50)==11
-    if home: assert slide(m,w)[3]==150
+    if home: assert slide(m,w)[3]==200
     else: assert m.selected(w)==3
     passed()
 
