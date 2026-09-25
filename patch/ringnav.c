@@ -4,13 +4,12 @@
 #define STOP 11
 #define GLIDE_MS 300
 #define SCROLL_MARGIN 12
-#define DOUBLE_CLICK_MS 300
+#define DOUBLE_CLICK_MS 200
 #define HOME_FAST_WINDOW_MS 200
 #define HOME_SLIDE_MS 150
 #define HOME_FAST_SLIDE_MS 75
 #define ACCEL_MS 140
-#define ACCEL_DIV 3
-#define ACCEL_MAX 8
+#define ACCEL_HOLD_MS 450
 #define SHORT_LIST_MAX 16
 #define MAX_ENTRIES 512
 #define POS_MEM 64
@@ -44,9 +43,11 @@ typedef struct {
     void *center_surface; /* navigation surface of that press */
     unsigned last_wheel;  /* time of the previous wheel detent */
     int wheel_dir;        /* direction of that detent */
-    unsigned wheel_run;   /* consecutive fast detents in that direction */
+    unsigned wheel_run;   /* continuous same-direction milliseconds + 1; capped at threshold */
+    int touch_mode;       /* session-wide drawing preference, independent of selection */
     void *wheel_top, *wheel_surface;
     unsigned wheel_scope;
+    int wheel_ctx;
     position_t pos[POS_MEM]; /* most recently selected first; keyed by context and scope */
     void *reveal_surface;    /* surface of the interrupted recall glide, 0 when none */
     int reveal_id;           /* logical row that glide was bringing into view */
@@ -128,18 +129,16 @@ static int clamp_step(int offset, int maximum, int delta) {
     return offset + delta;
 }
 
-/* Consecutive detents closer than ACCEL_MS in one direction step further, like spinning
- * an iPod wheel: x2 every ACCEL_DIV detents, capped at ACCEL_MAX. A pause or reversal
- * starts over. Stock rate-limits wheel keys to roughly one per 80-200 ms, so real ticks
- * land inside the acceleration window. */
+/* Two-row steps only after a sustained run of accepted same-direction ticks. */
 static int wheel_step(menu_t *m, void *top, int dir, unsigned now) {
     if (m->rows <= SHORT_LIST_MAX) {
         st.wheel_run = 0;
         return 1;
     }
     if (st.wheel_run && now - st.last_wheel <= ACCEL_MS && st.wheel_dir == dir &&
-        st.wheel_top == top && st.wheel_surface == m->w && st.wheel_scope == m->scope)
-        st.wheel_run += st.wheel_run < 3 * ACCEL_DIV;
+        st.wheel_top == top && st.wheel_surface == m->w && st.wheel_scope == m->scope &&
+        st.wheel_ctx == m->ctx)
+        st.wheel_run = (unsigned)clamp_step(st.wheel_run, ACCEL_HOLD_MS + 1, now - st.last_wheel);
     else
         st.wheel_run = 1;
     st.last_wheel = now;
@@ -147,8 +146,8 @@ static int wheel_step(menu_t *m, void *top, int dir, unsigned now) {
     st.wheel_top = top;
     st.wheel_surface = m->w;
     st.wheel_scope = m->scope;
-    unsigned run = st.wheel_run / ACCEL_DIV;
-    return run < 3 ? 1 << run : ACCEL_MAX; /* 3 = log2(ACCEL_MAX) */
+    st.wheel_ctx = m->ctx;
+    return st.wheel_run > ACCEL_HOLD_MS ? 2 : 1;
 }
 
 /* A tap target has an EVT_CLICK handler. V1.32 widget emitter @0x60; emitter_on_with_tag items are
@@ -411,7 +410,7 @@ static int context_now(unsigned *scope) {
 }
 
 static int index_of(menu_t *m, int id);
-static void reveal(menu_t *m, int id, int cancel);
+static void reveal(menu_t *m, int id, int immediate);
 
 /* Bounded recency order avoids a timestamp that could wrap during a long session. */
 static int position(menu_t *m) {
@@ -587,9 +586,19 @@ static void stop_scroll(menu_t *m) {
     }
 }
 
+/* Wheel offsets are synchronous; table setters can replace the recycled row pool. */
+static void wheel_offset(menu_t *m, int top) {
+    stop_scroll(m);
+    if (m->kind == 2) {
+        table_client_set_yoffset(m->w, top);
+        load_rows(m, m->w);
+    } else
+        scroll_view_set_offset(m->w, I(m->w, SCROLL_X), top);
+}
+
 /* Least viewport move that reveals logical row id with a small reading margin.
- * cancel stops a glide away from the live viewport, for a wheel reversal into it. */
-static void reveal(menu_t *m, int id, int cancel) {
+ * Remembered-position restoration keeps its glide; wheel steps are immediate. */
+static void reveal(menu_t *m, int id, int immediate) {
     int top = view_top(m);
     int y, h;
     if (m->kind == 2) {
@@ -608,10 +617,11 @@ static void reveal(menu_t *m, int id, int cancel) {
                : y - top > m->height - h - margin ? y - (m->height - h - margin)
                                                   : top;
     want = clamp_step(want, max_top(m), 0);
-    if (want == top) {
-        if (cancel && moving(m)) stop_scroll(m);
+    if (immediate) {
+        wheel_offset(m, want);
         return;
     }
+    if (want == top) return;
     /* Stock scroll views cannot retarget an animator whose old goal is a boundary. */
     stop_scroll(m);
     if (m->kind == 2) {
@@ -620,7 +630,7 @@ static void reveal(menu_t *m, int id, int cancel) {
         scroll_view_scroll_delta_to(m->w, 0, want - top, GLIDE_MS);
 }
 
-/* Keep selection during native momentum and wheel glides. Once settled, repair an offscreen
+/* Keep selection during native momentum and recall glides. Once settled, repair an offscreen
  * selection with the visible row nearest the viewport centre (ties go to the earlier row), so a
  * swipe never leaves the highlight pinned to the top edge. An interrupted recall glide is
  * retried once instead: the remembered row must not be silently replaced by a visible one. */
@@ -735,7 +745,7 @@ int ringnav_paint(void *w, void *canvas) {
     if (g_menu.kind == 3) return result; /* Home shows its selected card. */
     int i = reconcile(&g_menu,
                       !moving(&g_menu) && !window_manager_get_pointer_pressed(window_manager()));
-    if (i < 0) return result;
+    if (i < 0 || st.touch_mode) return result;
     rect_t r = bounds(&g_menu, i), old, clip;
     if (r.w < 5 || r.h < 5 || !P(canvas, CANVAS_LCD)) return result;
     canvas_get_clip_rect(canvas, &old);
@@ -784,7 +794,14 @@ int ringnav_paint(void *w, void *canvas) {
     return result;
 }
 
+static void hide_outline(void) {
+    st.touch_mode = 1;
+    void *top = window_manager_get_top_window(window_manager());
+    if (top) widget_invalidate_force(top, (void *)0);
+}
+
 int ringnav_touch(void *ctx, void *event) {
+    hide_outline();
     int result = stock_touch(ctx, event);
     /* A tap is a fresh interaction: it cancels a pending screen-toggle pair and any spin. */
     cancel_center();
@@ -815,6 +832,7 @@ static int selects(menu_t *m, void *target) {
  * Do not turn pointer-down into selection: a swipe is not a tap. */
 int ringnav_dispatch(void *target, void *event) {
     if (target && event && I(event, EVENT_TYPE) == EVT_CLICK) {
+        hide_outline();
         cancel_center(); /* A native activation supersedes confirmation, even without touch. */
         st.wheel_run = 0;
         st.home_surface = (void *)0;
@@ -848,7 +866,8 @@ int ringnav(void *ctx, void *event) {
     int result = stock_keyup(ctx, event);
     if (result) {
         cancel_center();
-        /* Stock debounce must not break a spin or restart the home interval. */
+        if (I(event, EVENT_KEY) == KEY_PREV || I(event, EVENT_KEY) == KEY_NEXT) st.wheel_run = 0;
+        /* Keep the home interval independent of rejected list navigation. */
         if (I(event, EVENT_KEY) == KEY_CENTER || !usable()) {
             st.wheel_run = 0;
             st.home_surface = (void *)0;
@@ -918,6 +937,7 @@ int ringnav(void *ctx, void *event) {
         }
         cancel_center();
         if (cur < 0) return STOP;
+        st.touch_mode = 0;
         select(&g_menu, g_menu.id[cur]);
         widget_invalidate_force(w, (void *)0);
         st.last_center = now;
@@ -940,6 +960,10 @@ int ringnav(void *ctx, void *event) {
             cancel_center(); /* Allocation failure consumes the press without a click. */
         return STOP;
     }
+    if (st.touch_mode) {
+        st.touch_mode = 0;
+        widget_invalidate_force(w, (void *)0);
+    }
     if (is_home(top, w)) {
         home_step(w, dir, now);
         widget_invalidate_force(w, (void *)0);
@@ -955,18 +979,19 @@ int ringnav(void *ctx, void *event) {
         int id = widget_get_prop_int(w, SEL, -1);
         int next = clamp_step(id < 0 ? (cur >= 0 ? g_menu.id[cur] : 0) : id, g_menu.rows - 1,
                               id < 0 ? 0 : dir * step);
-        if (next == id) return STOP;
+        if (next == 0 || next == g_menu.rows - 1) st.wheel_run = 0;
+        if (next == id) {
+            stop_scroll(&g_menu);
+            return STOP;
+        }
         select(&g_menu, next);
-        /* Reversing into the current viewport must cancel the previous glide away from it. */
+        /* Stop momentum even when the selected row already fits the viewport. */
         reveal(&g_menu, next, 1);
     } else {
         int top = view_top(&g_menu);
         int next = clamp_step(top, max_top(&g_menu), dir * RING_STEP * step);
-        stop_scroll(&g_menu);
-        if (g_menu.kind == 2) {
-            table_client_scroll_to(w, next);
-        } else if (next != top)
-            scroll_view_scroll_delta_to(w, 0, next - top, GLIDE_MS);
+        if (next == 0 || next >= max_top(&g_menu)) st.wheel_run = 0;
+        wheel_offset(&g_menu, next);
     }
     widget_invalidate_force(w, (void *)0);
     return STOP;
