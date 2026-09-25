@@ -1,0 +1,24 @@
+# Changelog
+
+- **V3.3R / V3.3C**: Compact returns from Now Playing with a single Return press again; the stock hold-release latch is cleared on that page instead of swallowing the release and forcing a second press.
+
+- **V3.2R / V3.2C**: Compact rows now fill the client area with 72-pixel rows, so the stock artwork keeps its natural size with an even eight-pixel inset instead of being scaled down. Navigation and all other behavior are unchanged.
+
+- **V3.1R / V3.1C**: Shared normal and compact builds, compact local lists and long Return to Now Playing, and a reproducible dual-variant release procedure.
+
+- **V3.0R**: Long lists accelerate smoothly again: each 100 ms of sustained same-direction spin adds a row to the step, up to eight rows per tick, replacing the V2.7R/V2.8R three-speed ladder. Stopping, reversing or easing off still drops back to one row immediately. The selected-row outline is now a softer translucent white line, so it sits better against the dark theme while the dark separator still keeps it readable over bright album art. The shipped `config.ini` is no longer modified, so a fresh install keeps the stock key tone default; a device that already ran V2.9R keeps its saved setting and can change it in the system settings.
+- **V2.9R**: Restores the stock wheel and button input path, removing the V2.8R 25 ms detent hold. The key tone now ships disabled, so wheel and button feedback is silent by default; enable **Key Tone** in the system settings to bring the clicks back. The three-speed wheel acceleration from V2.8R is unchanged.
+- **V2.8R**: Wheel acceleration adds a third speed: longer lists step two rows after 300 ms and three rows after 600 ms of continuous same-direction turns. A wheel button press no longer plays a second tick from the capacitive touch, drops the phantom step with it, and the wheel is ready again as soon as the button is released.
+- **V2.7R**: Wheel turns move the list immediately instead of animating, and lists longer than 16 rows step two rows after 450 ms of continuous same-direction turns. Touching the screen hides the selection outline until the next accepted wheel or centre action, including across page changes. Centre confirmation and the double-press screen toggle now use a 200 ms window.
+- **V2.6R**: Wheel input replaces an unfinished scroll-view animation so reversing a glide toward a list boundary takes effect immediately. Native clicks also reset wheel acceleration and the home wheel interval when no touch-down event was delivered.
+- **V2.5R**: Native clicks cancel pending centre confirmation even without a touch-down event. Rejected confirmations leave changed lists and their remembered positions untouched. Double-press still turns the screen off after interrupting a recalled list with touch. Custom boot logos must use the stock renderer's supported JPEG frame format; packaging uses a snapshot of the validated image.
+- **V2.4R**: Taps and centre presses stay bound to the row they started on, so a rebuilt or still-settling list cannot move the row under your finger or open a different one. Page-snapping views no longer capture the wheel, and a failed rounded outline stroke falls back to the square outline.
+- **V2.3R**: Wheel selection and restored positions keep a small margin from the screen edge, and reversing the home wheel responds immediately to correct an overshoot.
+- **V2.2R**: Remembers the 64 most recently selected browsing positions, restoring folders and music queries on return. Lists of 16 or fewer items stay at one row per wheel detent, even during quick turns.
+- **V2.1R**: Fast-spin acceleration stays within the current menu and resets after a folder/query change, list resize, interrupted gesture or sleep. Oversized rows reveal their title consistently when selected or restored.
+- **V2.0R**: Centre presses now confirm after 300 ms, allowing a second press within that window to turn the screen off. Home carousel wheel input is paced to make cards easier to select. Includes an orientation fixed boot logo.
+- **V1.9R**: The selection outline is now one crisp white line over a dark separator and the subtle dark fill, so it stays readable over bright album art. A canvas that declines rounded drawing keeps the square outline.
+- **V1.8R**: Wheel acceleration, gliding music tables, a scoped double-press screen toggle, nested tap-target selection, per-context position memory with row-text identity, multi-pane surface selection, a centre-nearest swipe settle and a build-time context audit.
+- **V1.7R**: Added centre button double-press to toggle the screen on/off.
+- **V1.6R**: Home screen now keeps the stock selected-card highlight without any extra outline.
+- **V1.5R**: Added menu item highlighting, centre-button selection, and music selection features.
