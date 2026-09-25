@@ -3,7 +3,7 @@
 
 --logo swaps the boot splash JPEG (320x375); it defaults to assets/logo.jpg.
 """
-import argparse, hashlib, io, json, pathlib, re, struct, subprocess, tarfile, zipfile
+import argparse, hashlib, io, json, pathlib, re, shlex, struct, subprocess, tarfile, zipfile
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ZIP_SHA = '154c17822d09be001be35c03d2d3488424dee195221790bd70864480d55b0f00'
 DEMO_SHA = '2c5f06142850b4fc168f82b44a81550cce0a5b4b9fe1c179dced4a08a3049138'
@@ -245,36 +245,23 @@ def build(zip_path, out, logo):
     pseudo = out/'root.pseudo'
     run('unsquashfs','-pf',pseudo,sq)
     p = pseudo.read_bytes()
-    old = re.search(rb'^release/bin/demo R (\d+) (\d+) (\d+) (\d+) .+$',p,re.M)
-    check(old is not None, 'Missing demo pseudo inode')
     # mksquashfs takes "/" from the source dir, not the pseudo file; carry stock values over.
     root = re.search(rb'^/ D (\d+) (\d+) (\d+) (\d+)$',p,re.M)
     check(root is not None, 'Missing root pseudo inode')
     t,mode,uid,gid = (x.decode() for x in root.groups())
     rootargs = ['-root-time',t,'-root-mode',mode,'-root-uid',uid,'-root-gid',gid]
     # Paths are passed through a shell by mksquashfs F entries; quote them explicitly.
-    import shlex
-    replacement = b'release/bin/demo F '+b' '.join(old.groups())+b' cat '+shlex.quote(str(out/'demo')).encode()
-    p = p[:old.start()]+replacement+p[old.end():]
+    def swap_inode(p, path, src):
+        line = re.search(rb'^'+re.escape(path)+rb' R (\d+) (\d+) (\d+) (\d+) .+$',p,re.M)
+        check(line is not None, f'Missing {path.decode()} pseudo inode')
+        return p[:line.start()]+path+b' F '+b' '.join(line.groups())+b' cat '+shlex.quote(str(src)).encode()+p[line.end():]
+    p = swap_inode(p, b'release/bin/demo', out/'demo')
     logo_data = logo.read_bytes()
     check(jpeg_size(logo_data) == (320, 375), 'Logo must be 320x375 like the stock splash')
     # Package exactly the validated bytes, even if the input is edited during compression.
     logo = out/'logo.jpg'
     logo.write_bytes(logo_data)
-    line = re.search(rb'^release/assets/default/raw/images/xx/logo\.jpg R (\d+) (\d+) (\d+) (\d+) .+$', p, re.M)
-    check(line is not None, 'Missing stock logo inode')
-    replacement = b'release/assets/default/raw/images/xx/logo.jpg F '+b' '.join(line.groups())+b' cat '+shlex.quote(str(logo)).encode()
-    p = p[:line.start()]+replacement+p[line.end():]
-    # Ship the key tone off by default. The app copies this file to /mnt/data/config.ini only when
-    # that user copy does not exist, so an existing device keeps whatever the user set.
-    config = subprocess.check_output(['unsquashfs','-cat',str(sq),'release/assets/default/raw/config.ini'])
-    check(config.count(b'KEYTONE=1') == 1, 'Unexpected stock key tone default')
-    config_file = out/'config.ini'
-    config_file.write_bytes(config.replace(b'KEYTONE=1', b'KEYTONE=0'))
-    line = re.search(rb'^release/assets/default/raw/config\.ini R (\d+) (\d+) (\d+) (\d+) .+$', p, re.M)
-    check(line is not None, 'Missing stock config inode')
-    replacement = b'release/assets/default/raw/config.ini F '+b' '.join(line.groups())+b' cat '+shlex.quote(str(config_file)).encode()
-    p = p[:line.start()]+replacement+p[line.end():]
+    p = swap_inode(p, b'release/assets/default/raw/images/xx/logo.jpg', logo)
     pseudo.write_bytes(p)
     (out/'empty').mkdir()
     newsq = out/'rootfs.squashfs'

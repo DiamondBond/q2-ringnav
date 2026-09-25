@@ -219,35 +219,15 @@ static int slide_index(void *w) {
 }
 
 static int home_done(void *w, void *event) {
-    if (widget_count_children(w)) {
-        slide_menu_on_scroll_done(w, event);
-        /* Stock skips focus restoration when a reversal returns to the original index. */
-        widget_set_focused(widget_get_child(w, I(w, SLIDE_INDEX)), 1);
-    } else {
-        I(w, SLIDE_OFFSET) = 0;
-        P(w, SLIDE_ANIMATOR) = (void *)0;
-    }
+    slide_menu_on_scroll_done(w, event);
+    /* Stock skips focus restoration when a reversal returns to the original index. */
+    widget_set_focused(widget_get_child(w, I(w, SLIDE_INDEX)), 1);
     return 7; /* RET_REMOVE: same one-shot lifetime as stock completion */
 }
 
 static void home_step(void *w, int dir, unsigned now) {
     int n = (int)widget_count_children(w);
     int stride = slide_menu_item_width(w) + I(w, SLIDE_SPACER);
-    if (n <= 1 || stride <= 0) {
-        void *a = P(w, SLIDE_ANIMATOR);
-        if (a) {
-            widget_animator_pause(a);
-            widget_animator_destroy(a);
-            P(w, SLIDE_ANIMATOR) = (void *)0;
-            I(w, SLIDE_OFFSET) = 0;
-        }
-        if (n == 1) {
-            slide_menu_set_value(w, 0);
-            widget_set_focused(widget_get_child(w, 0), 1);
-        }
-        st.home_surface = (void *)0;
-        return;
-    }
     int fast =
         st.home_surface == w && st.home_dir == dir && now - st.last_home <= HOME_FAST_WINDOW_MS;
     void *a = P(w, SLIDE_ANIMATOR);

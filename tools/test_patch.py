@@ -999,22 +999,6 @@ for action in ('touch','center','click','leave','animating','pressed','unusable'
 m=Machine(); w=m.page('home_page','slide_menu'); m.call(gap=0)
 m.byte(0xa37c89,1); assert m.call(O['KEY_PREV'],gap=20,debounce=True)==11
 assert not m.moved(); m.call(gap=20); assert slide(m,w)[3]==120; passed()
-for count in (0,1):
-    m=Machine(); w=m.page('home_page','slide_menu'); m.nodes[w]['children']=m.nodes[w]['children'][:count]
-    for key in (O['KEY_NEXT'],O['KEY_PREV']):
-        assert m.call(key,gap=0)==11 and not m.slides
-    passed()
-# Resizing to an empty/single-icon menu cancels the active animator; empty completion
-# is also safe if no further wheel event arrives after the resize.
-for count in (0,1):
-    m=Machine(); w=m.page('home_page','slide_menu'); m.call(gap=0)
-    m.nodes[w]['children']=m.nodes[w]['children'][:count]
-    m.call(gap=20)
-    assert not m.slides and not m.get(w+O['SLIDE_ANIMATOR'])
-    m.advance(500); assert not m.get(w+O['SLIDE_OFFSET']); passed()
-m=Machine(); w=m.page('home_page','slide_menu'); m.call(gap=0)
-m.nodes[w]['children']=[]; m.advance(200)
-assert not m.slides and not m.get(w+O['SLIDE_ANIMATOR']); passed()
 # Animator and callback allocation failures settle through stock selection.
 for failure in ('slide_fail','slide_on_fail'):
     m=Machine(); w=m.page('home_page','slide_menu'); setattr(m,failure,True)
