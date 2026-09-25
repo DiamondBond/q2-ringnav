@@ -528,8 +528,9 @@ static void reveal(menu_t *m, int id, int cancel) {
         if (cancel && moving(m)) stop_scroll(m);
         return;
     }
+    /* Stock scroll views cannot retarget an animator whose old goal is a boundary. */
+    stop_scroll(m);
     if (m->kind == 2) {
-        stop_scroll(m);
         table_client_scroll_to(m->w, want);
     } else
         scroll_view_scroll_delta_to(m->w, 0, want - top, GLIDE_MS);
@@ -731,6 +732,8 @@ static int selects(menu_t *m, void *target) {
 int ringnav_dispatch(void *target, void *event) {
     if (target && event && I(event, EVENT_TYPE) == EVT_CLICK) {
         cancel_center(); /* A native activation supersedes confirmation, even without touch. */
+        st.wheel_run = 0;
+        st.home_surface = (void *)0;
         void *other = (void *)0;
         void *w = surface(target, &other);
         /* A tap owns its live row: recall could scroll/rebind that row before delivery. */
@@ -875,8 +878,8 @@ int ringnav(void *ctx, void *event) {
     } else {
         int top = view_top(&g_menu);
         int next = clamp_step(top, max_top(&g_menu), dir * RING_STEP * step);
+        stop_scroll(&g_menu);
         if (g_menu.kind == 2) {
-            stop_scroll(&g_menu);
             table_client_scroll_to(w, next);
         } else if (next != top)
             scroll_view_scroll_delta_to(w, 0, next - top, GLIDE_MS);

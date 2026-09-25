@@ -167,6 +167,7 @@ class Machine:
             if self.on_click: self.on_click(a,b)
             ret=0
         elif name=='table_client_stop_animator_scroll': self.word(a+O['TABLE_ANIMATOR'],0); ret=0
+        elif name=='widget_animator_scroll_create': ret=self.alloc(0x80)
         elif name=='table_client_scroll_to':
             if self.glide:
                 self.word(a+O['TABLE_TOP'],b)
@@ -298,6 +299,30 @@ def passed():
     global checks
     checks+=1
 
+# Execute stock scroll retargeting: an animator headed to either boundary refuses a new
+# destination. Wheel takeover must replace it, for selected rows and pixel-scroll fallback.
+for populated in (False,True):
+    for endpoint,key,selected,want in ((0,O['KEY_NEXT'],4,204),
+                                      (864,O['KEY_PREV'],5,180)):
+        m=Machine(); w,es=m.page_list(20 if populated else 0)
+        m.word(w+0x74,syms['g_scroll_view_vtable'])
+        m.paint(w)
+        m.nodes[w]['_ringnav_index']=selected if populated else -1
+        top=120 if endpoint==0 else 240
+        m.word(w+O['SCROLL_Y'],top)
+        animator=m.alloc(0x80); m.word(animator+0x64,endpoint)
+        m.word(w+O['VIEW_ANIMATOR'],animator)
+        del m.handlers[syms['scroll_view_scroll_delta_to']]
+        for name in ('widget_animator_scroll_create','widget_animator_on',
+                     'widget_animator_start','widget_dispatch_simple_event'):
+            m.handlers[syms[name]]=name
+        assert m.call(key)==11
+        active=m.get(w+O['VIEW_ANIMATOR'])
+        expected=want if populated else top+(48 if endpoint==0 else -48)
+        assert m.get(active+0x64)==expected, (populated,endpoint,m.get(active+0x64),expected)
+        assert m.get(active+0x6c)==top
+        passed()
+
 for t,off in [('scroll_view',O['SCROLL_Y']),('table_client',O['TABLE_TOP'])]:
     m=Machine(); w=m.page(t=t)
     for _ in range(20): assert m.call()==11
@@ -350,7 +375,7 @@ m.nodes[b]['_ringnav_index']=0
 assert m.call()==11 and not m.moved(); passed()
 for attribute in ['visible','enable']:
     m=Machine(); w=m.page(); m.nodes[w][attribute]=0; assert m.call()==11 and not m.moved(); passed()
-# An in-flight scroll animation is retargeted by the animated glide, not torn down.
+# Wheel scrolling requests a native animated glide from the current viewport.
 m=Machine(); w=m.page(); m.word(w+O['SCROLL_Y'],100)
 assert m.call()==11 and m.moved()[0][0]=='scroll_view_scroll_delta_to' and m.moved()[0][3]==48
 assert m.get(w+O['SCROLL_Y'])==148 and m.get(w+O['VIEW_ANIMATOR'])==0; passed()
@@ -1305,6 +1330,21 @@ for target_kind in ('same', 'nested', 'outside'):
            event_type=O['EVT_CLICK'],gap=100)
     m.advance(300)
     assert m.clicks==[target] and not m.timers,target_kind
+    passed()
+
+# A native activation also ends the prior wheel gesture when no pointer-down was delivered.
+for home in (False,True):
+    m=Machine(); w,es=m.page_list(40,extent=1920)
+    if home:
+        m.nodes[m.top]['name']='home_page'; m.nodes[w]['type']='slide_menu'
+        m.word(w+O['SLIDE_INDEX'],0)
+    m.call(gap=0)
+    if not home: m.call(gap=50)
+    m.call(address=HOOKS['widget_dispatch'][0],args=(es[0 if home else 2],m.event,0,0),
+           event_type=O['EVT_CLICK'],gap=50)
+    assert m.call(gap=50)==11
+    if home: assert len(m.moved())==1
+    else: assert m.selected(w)==3
     passed()
 
 # Centre consumes a touch interruption once; its second release must not stop the recall

@@ -4,7 +4,7 @@ Firmware mod for the Shanling Q2 that lets you use the scroll wheel to move thro
 
 The touchscreen still works normally. Outside supported menus, the wheel still controls volume.
 
-**Latest firmware: V2.5R**
+**Latest firmware: V2.6R**
 
 [**Download the latest release**](https://github.com/DiamondBond/q2-ringnav/releases/latest)
 
@@ -16,7 +16,7 @@ Make sure the Q2 is charged before updating, and don't remove the microSD card w
 2. Unzip it and copy `update.tar` to the root of your microSD card.
 3. On the Q2, go to **System settings → System Update → TF card update**.
 4. Confirm the update and wait for the player to restart.
-5. Check **About** and make sure it shows `V2.5R`.
+5. Check **About** and make sure it shows `V2.6R`.
 
 To restore stock firmware via the UI; flash the [Shanling Q2 official firmware](https://en.shanling.com/download/150) through **System settings → System Update → TF card update**.
 
@@ -46,6 +46,7 @@ If you find a menu where something behaves strangely, please open an issue and s
 
 ## Changelog
 
+- **V2.6R**: Wheel input replaces an unfinished scroll-view animation so reversing a glide toward a list boundary takes effect immediately. Native clicks also reset wheel acceleration and the home wheel interval when no touch-down event was delivered.
 - **V2.5R**: Native clicks cancel pending centre confirmation even without a touch-down event. Rejected confirmations leave changed lists and their remembered positions untouched. Double-press still turns the screen off after interrupting a recalled list with touch. Custom boot logos must use the stock renderer's supported JPEG frame format; packaging uses a snapshot of the validated image.
 - **V2.4R**: Taps and centre presses stay bound to the row they started on, so a rebuilt or still-settling list cannot move the row under your finger or open a different one. Page-snapping views no longer capture the wheel, and a failed rounded outline stroke falls back to the square outline.
 - **V2.3R**: Wheel selection and restored positions keep a small margin from the screen edge, and reversing the home wheel responds immediately to correct an overshoot.
