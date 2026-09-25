@@ -4,7 +4,9 @@ Firmware mod for the Shanling Q2 that lets you use the scroll wheel to move thro
 
 The touchscreen still works normally. Outside supported menus, the wheel still controls volume.
 
-**Latest firmware: V3.0R**
+**V3.1 build variants: V3.1R (normal), V3.1C (compact)**
+
+V3.1 requires device acceptance before publication; the latest-release link points to the last published release.
 
 [**Download the latest release**](https://github.com/DiamondBond/q2-ringnav/releases/latest)
 
@@ -16,7 +18,7 @@ Make sure the Q2 is charged before updating, and don't remove the microSD card w
 2. Unzip it and copy `update.tar` to the root of your microSD card.
 3. On the Q2, go to **System settings → System Update → TF card update**.
 4. Confirm the update and wait for the player to restart.
-5. Check **About** and make sure it shows `V3.0R`.
+5. Check **About** and make sure it shows `V3.1R` for normal or `V3.1C` for compact.
 
 To restore stock firmware via the UI; flash the [Shanling Q2 official firmware](https://en.shanling.com/download/150) through **System settings → System Update → TF card update**.
 
@@ -25,6 +27,19 @@ If the UI is not working, use [Shanling's recovery package](https://drive.google
 1. Copy the complete `recovery-update` folder to the root of the microSD card.
 2. Hold the previous-song button, then power on the Q2 with the centre button.
 3. The player will automatically check for a firmware update.
+
+## Variants
+
+`Q2.Firmware.V3.1.zip` keeps the normal UI and existing controls, including long Return → Home.
+`Q2.Firmware.V3.1-compact.zip` hides the primary toolbar in Folder and Local Songs browsing and
+uses 65-pixel rows: ordinary lists fit four complete rows with stock fonts. Separate action
+bars, Play All/sort, tabs, editing controls and album grid modes remain; these can show fewer
+entries. Settings, online services, Now Playing, home and dialogs keep their stock layouts.
+The folder artwork setting and saved preferences remain intact.
+
+Compact long Return opens Now Playing without restarting playback, including when already
+playing; its release is consumed. Short Return keeps stock Back and nested folder traversal.
+Other long presses are unchanged. The proposed short Return shortcut on Home remains deferred.
 
 ## Controls
 
@@ -47,6 +62,8 @@ If you find a menu where something behaves strangely, please open an issue and s
 
 ## Changelog
 
+- **V3.1R / V3.1C (pending device acceptance)**: Shared normal and compact builds, compact local lists and long Return to Now Playing, and a reproducible dual-variant release procedure.
+
 - **V3.0R**: Long lists accelerate smoothly again: each 100 ms of sustained same-direction spin adds a row to the step, up to eight rows per tick, replacing the V2.7R/V2.8R three-speed ladder. Stopping, reversing or easing off still drops back to one row immediately. The selected-row outline is now a softer translucent white line, so it sits better against the dark theme while the dark separator still keeps it readable over bright album art. The shipped `config.ini` is no longer modified, so a fresh install keeps the stock key tone default; a device that already ran V2.9R keeps its saved setting and can change it in the system settings.
 - **V2.9R**: Restores the stock wheel and button input path, removing the V2.8R 25 ms detent hold. The key tone now ships disabled, so wheel and button feedback is silent by default; enable **Key Tone** in the system settings to bring the clicks back. The three-speed wheel acceleration from V2.8R is unchanged.
 - **V2.8R**: Wheel acceleration adds a third speed: longer lists step two rows after 300 ms and three rows after 600 ms of continuous same-direction turns. A wheel button press no longer plays a second tick from the capacitive touch, drops the phantom step with it, and the wheel is ready again as soon as the button is released.
@@ -68,7 +85,7 @@ If you find a menu where something behaves strangely, please open an issue and s
 
 # Technical details
 
-`release/bin/demo` and the boot logo inside `rootfs.squashfs` change. The kernel is byte-identical, and the builder checks every other inode's name, type, mtime, mode, uid and gid against stock.
+`release/bin/demo` and the boot logo inside `rootfs.squashfs` change. Compact additionally changes only the nine audited local UI assets in `patch/compact.json`. The kernel is byte-identical, and the builder checks every other inode's name, type, mtime, mode, uid and gid against stock.
 
 Four checked MIPS prologues redirect into a payload at `0xb00000`, using the final unused `PT_NULL` program header. Trampolines restore the stock GOT base and resume each original function after its PIC setup:
 
@@ -115,6 +132,7 @@ SHA-256 of the stock Shanling Q2 V1.32 firmware ZIP.
 
 ```sh
 python3 tools/build.py 'Q2 Firmware V1.32.zip' --out /tmp/q2-build
+python3 tools/build.py 'Q2 Firmware V1.32.zip' --out /tmp/q2-compact --compact
 python3 tools/test_build.py  # JPEG header checks; no emulator required
 python3 tools/test_build.py 'Q2 Firmware V1.32.zip'  # optional packaging/reproducibility checks
 python3 tools/test_patch.py /tmp/q2-build  # after: pip install -r requirements.txt
@@ -137,3 +155,33 @@ A MIPS instruction-count regression check verifies that filling the position tab
 Two fresh builds must produce identical `update.tar` files. Packaging verifies MD5 entries, unchanged kernel and rootfs metadata, and a rootfs no larger than stock.
 
 For on-device acceptance, browse a long list and confirm immediate response, a smooth pull up to eight rows per tick and precise reversal. Tap and swipe across panes and pages and confirm no outline lingers or returns until wheel/centre input; also try a wheel turn at a list end. Tune `WHEEL_RUN_MS`, `WHEEL_RAMP_MS` and `WHEEL_MAX_STEP` if needed. Check the selected-row margin in ordinary and music lists, including their ends and tall rows; spin the home wheel and confirm rapid turns visibly advance through multiple icons, reverse midway through both slow and fast slides, and check that no unwanted movement remains after the final slide settles. Tap a row as soon as a list appears, and again while a long list is still settling, and confirm the touched row opens. Also browse parent → child → grandchild folders, return to each selected folder, and check quick turns on short menus. Also revisit albums/queries and confirm their selections remain separate. Emulator checks do not replace this hardware check.
+
+## Standard release procedure
+
+Keep the proprietary stock ZIP local. Use the Python environment with `requirements.txt`
+installed for these commands:
+
+```sh
+python3 tools/release.py package 'Q2 Firmware V1.32.zip' --out /tmp/q2-v31-release
+python3 tools/test_release.py
+# Optional: create/update a draft with BOTH validated ZIPs and verify remote bytes.
+python3 tools/release.py upload /tmp/q2-v31-release
+```
+
+Packaging requires a fresh output directory, builds each variant twice, runs the shared MIPS
+suite and asset checks on each build, and compares update.tar and ZIP bytes. It writes both
+ZIPs, manifests, SHA256SUMS, release notes, source revision/hash and a device acceptance form.
+Normal is the default for direct builds; a single direct build is never a release input.
+Upload revalidates both variants and refuses stale, missing or changed artifacts and published
+releases. An upload/download failure leaves the release unpublished; rerun upload to repair the
+draft. Packaging uses no GitHub credentials or network.
+
+Complete the [device checklist](docs/compact.md) on both exact ZIPs, then mark the corresponding
+checks `true` in the generated `device-checks.json`. Publication is a separate, explicit step:
+
+```sh
+python3 tools/release.py upload /tmp/q2-v31-release --publish \
+  --device-checks /tmp/q2-v31-release/device-checks.json
+```
+
+The checks are bound to both ZIP hashes. Changing a ZIP requires new device acceptance.

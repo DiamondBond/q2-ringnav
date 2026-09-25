@@ -844,6 +844,19 @@ int ringnav_dispatch(void *target, void *event) {
     return stock_dispatch(target, event);
 }
 
+#if COMPACT
+/* Called only by stock long Return, after its power/lock gates and release guard. */
+int compact_now_playing(void) {
+    cancel_center();
+    drop_spin();
+    if (usable()) {
+        static const int context[4] = { 0, 0, 0xff, 2 };
+        navigator_switch_to_with_context("playing_page", context, 0);
+    }
+    return 0;
+}
+#endif
+
 int ringnav(void *ctx, void *event) {
     /* The stock filter dereferences the event before returning. */
     if (!event) {

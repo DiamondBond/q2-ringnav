@@ -7,7 +7,8 @@ import argparse, hashlib, io, json, pathlib, re, shlex, struct, subprocess, tarf
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ZIP_SHA = '154c17822d09be001be35c03d2d3488424dee195221790bd70864480d55b0f00'
 DEMO_SHA = '2c5f06142850b4fc168f82b44a81550cce0a5b4b9fe1c179dced4a08a3049138'
-VERSION = 'V3.0R'
+VERSION = 'V3.1R'
+VERSIONS = {'normal': VERSION, 'compact': 'V3.1C'}
 BASE = 0xb00000
 SCRATCH = 0xb0f000
 RING_STEP = 48
@@ -27,7 +28,8 @@ def source_sha256():
     """Hash every build input, so a test run cannot silently use a stale output directory."""
     h = hashlib.sha256()
     for rel in ['assets/logo.jpg', 'patch/contexts.inc', 'patch/link.ld', 'patch/offsets.inc',
-                'patch/ringnav.c', 'patch/trampoline.S', 'tools/build.py']:
+                'patch/ringnav.c', 'patch/trampoline.S', 'patch/compact.json',
+                'tools/compact.py', 'tools/release.py', 'tools/build.py']:
         h.update(rel.encode() + b'\0')
         h.update((ROOT/rel).read_bytes())
     return h.hexdigest()
@@ -81,6 +83,7 @@ def fileoff(b, a):
     raise ValueError(f'Unmapped address {a:x}')
 
 FUNCTIONS = {
+ 'navigator_switch_to_with_context': ('int', 'const char *, const void *, int'),
  'window_manager': ('void *', 'void'),
  'window_manager_get_top_window': ('void *', 'void *'),
  'window_manager_is_animating': ('int', 'void *'),
@@ -142,16 +145,18 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
          '-fno-stack-protector','-fno-unwind-tables','-fno-asynchronous-unwind-tables',
          '-Os','-Wall','-Wextra','-Werror']
 
-def compile_payload(out):
+def compile_payload(out, compact=False):
     """Compile and link the payload."""
-    run('clang',*FLAGS,'-I',out,'-c',ROOT/'patch/ringnav.c','-o',out/'ringnav.o')
+    run('clang',*FLAGS,f'-DCOMPACT={int(compact)}','-I',out,'-c',ROOT/'patch/ringnav.c','-o',out/'ringnav.o')
     run('clang',*FLAGS,'-c',ROOT/'patch/trampoline.S','-o',out/'trampoline.o')
     run('ld.lld','-m','elf32ltsmip','-T',ROOT/'patch/link.ld','-e','ringnav',
         out/'ringnav.o',out/'trampoline.o','-o',out/'patch.elf')
     run('llvm-objcopy','-O','binary',out/'patch.elf',out/'patch.bin')
     return symbols(out/'patch.elf')
 
-def build(zip_path, out, logo):
+def build(zip_path, out, logo, compact=False):
+    variant = 'compact' if compact else 'normal'
+    version = VERSIONS[variant]
     out.mkdir(parents=True, exist_ok=True)
     check(not (out/'update.tar').exists(), 'Output already exists; use a fresh --out directory')
     source = source_sha256()
@@ -207,7 +212,7 @@ def build(zip_path, out, logo):
                         symbol_table, re.M), f'{name}: context data size mismatch')
         header.append(f'#define {name} ((const unsigned char *)0x{syms[name]:x}u)')
     (out/'stock.h').write_text('\n'.join(header)+'\n')
-    ps = compile_payload(out)
+    ps = compile_payload(out, compact)
     payload = (out/'patch.bin').read_bytes()
     check(len(payload) < SCRATCH-BASE, 'Payload overlaps its scratch page')
     check(ps['__scratch_start'] == SCRATCH, 'Scratch state moved')
@@ -226,11 +231,15 @@ def build(zip_path, out, logo):
         check(gp == 0xa26cc0, f'{name}: unexpected GOT base')
         patched[off:off+8] = struct.pack('<II', 0x08000000 | (ps[replacement] >> 2), 0)
         hooks[name] = dict(address=hex(address), replacement=replacement, original=raw_demo[off:off+12].hex())
+    code_changes = []
+    if compact:
+        from compact import patch_code
+        code_changes = patch_code(patched, fileoff, ps)
     # Single shared version literal: About display and updater equality check.
     check(patched.count(b'V1.32\0') == 1, 'Version literal is not unique')
-    check(len(VERSION) + 1 == len(b'V1.32\0'),
+    check(len(version) + 1 == len(b'V1.32\0'),
           'VERSION must stay 5 characters; a longer literal shifts every later file offset')
-    patched = patched.replace(b'V1.32\0', VERSION.encode()+b'\0')
+    patched = patched.replace(b'V1.32\0', version.encode()+b'\0')
     nulls = [(o,p) for o,p in segments(patched) if p[0] == 0]
     check(len(nulls) == 1 and nulls[0][0] == segments(patched)[-1][0], 'No final PT_NULL slot')
     check(all(p[2]+p[5] < BASE for _,p in segments(patched) if p[0] == 1), 'Patch mapping overlaps')
@@ -262,6 +271,18 @@ def build(zip_path, out, logo):
     logo = out/'logo.jpg'
     logo.write_bytes(logo_data)
     p = swap_inode(p, b'release/assets/default/raw/images/xx/logo.jpg', logo)
+    changed_assets = {}
+    if compact:
+        from compact import AUDIT, patch_asset
+        for rel in AUDIT['assets']:
+            path = 'release/assets/default/raw/ui/' + rel
+            original = subprocess.check_output(['unsquashfs', '-cat', str(sq), path])
+            data = patch_asset(rel, original)
+            target = out/'ui'/rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            p = swap_inode(p, path.encode(), target)
+            changed_assets[path] = dict(original_sha256=sha(original), sha256=sha(data))
     pseudo.write_bytes(p)
     (out/'empty').mkdir()
     newsq = out/'rootfs.squashfs'
@@ -276,7 +297,7 @@ def build(zip_path, out, logo):
     blobs['recovery-update/rootfs.squashfs'] = newsq.read_bytes()
     # Stock image proves this size fits; do not enlarge beyond its padded size.
     check(len(blobs['recovery-update/rootfs.squashfs']) <= sq.stat().st_size, 'Repacked rootfs exceeds stock size')
-    blobs['firmware_v20.info'] = (f'Shanling Q2\n{VERSION}\n'+''.join(
+    blobs['firmware_v20.info'] = (f'Shanling Q2\n{version}\n'+''.join(
         hashlib.md5(blobs[n]).hexdigest()+'  '+n+'\n' for n in [
             'recovery-update/xImage','recovery-update/rootfs.squashfs'])).encode()
     with tarfile.open(out/'update.tar','w',format=tarfile.GNU_FORMAT) as t:
@@ -289,7 +310,7 @@ def build(zip_path, out, logo):
         rootfs_sha256=sha(newsq.read_bytes()), kernel_sha256=sha(blobs['recovery-update/xImage']),
         hook_address=hex(HOOK), hook_file_offset=hex(hookoff), patch_address=hex(BASE),
         patch_file_offset=hex(appendoff), patch_bytes=len(payload), ring_step_pixels=RING_STEP,
-        version=VERSION, hooks=hooks, logo_sha256=sha(logo_data),
+        version=version, variant=variant, compact_code=code_changes, changed_assets=changed_assets, hooks=hooks, logo_sha256=sha(logo_data),
         patch_symbols={n:hex(v) for n,v in ps.items() if n.startswith('stock_')},
         tools={t:run(t,'--version').splitlines()[0] for t in ['clang','ld.lld','llvm-objcopy']})
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
@@ -301,8 +322,9 @@ if __name__ == '__main__':
     ap.add_argument('--out',type=pathlib.Path,default=ROOT/'build')
     ap.add_argument('--logo',type=pathlib.Path,default=ROOT/'assets/logo.jpg',
                     help='320x375 JPEG boot splash (default: assets/logo.jpg)')
+    ap.add_argument('--compact', action='store_true', help='compact local browsing and long Return to Now Playing')
     a=ap.parse_args()
     try:
-        build(a.zip,a.out.resolve(),a.logo)
+        build(a.zip,a.out.resolve(),a.logo,a.compact)
     except (OSError, ValueError, zipfile.BadZipFile, subprocess.CalledProcessError) as exc:
         ap.error(str(exc))

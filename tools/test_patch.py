@@ -5,7 +5,7 @@ Requires unicorn==2.1.4. Does not emulate the entire device or flash hardware.
 import json, math, pathlib, re, struct, sys
 from unicorn import Uc, UcError, UC_ARCH_MIPS, UC_MODE_MIPS32, UC_MODE_LITTLE_ENDIAN, UC_HOOK_CODE
 from unicorn.mips_const import *
-from build import segments, symbols, HOOK, HOOKS, FUNCTIONS, GLOBALS, CONTEXT_DATA, ROOT, source_sha256, sha, PRIVATE_FUNCTIONS
+from build import segments, symbols, HOOK, HOOKS, FUNCTIONS, GLOBALS, CONTEXT_DATA, ROOT, source_sha256, sha, PRIVATE_FUNCTIONS, VERSIONS
 B=pathlib.Path(sys.argv[1] if len(sys.argv)>1 else 'build')
 manifest=json.loads((B/'manifest.json').read_text())
 if manifest.get('source_sha256') != source_sha256():
@@ -13,9 +13,10 @@ if manifest.get('source_sha256') != source_sha256():
 for name,key in (('demo','demo_sha256'),('stock-demo','stock_demo_sha256'),('patch.bin','patch_sha256')):
     if sha((B/name).read_bytes()) != manifest.get(key):
         raise SystemExit(f'{B/name} does not match manifest.json; rebuild into a fresh directory')
-readme=(ROOT/'README.md').read_text()
-if f'**Latest firmware: {manifest["version"]}**' not in readme or f'shows `{manifest["version"]}`' not in readme:
-    raise SystemExit(f'README.md does not present {manifest["version"]} as the current firmware; update the version lines before testing')
+variant = manifest.get('variant')
+assert variant in VERSIONS and manifest['version'] == VERSIONS[variant], 'Wrong variant/version'
+assert (manifest.get('changed_assets') != {}) == (variant == 'compact')
+assert (manifest.get('compact_code') != []) == (variant == 'compact')
 O={m.group(1):int(m.group(2),0) for m in re.finditer(r'^#define\s+(\w+)\s+(0x[0-9A-Fa-f]+|\d+)\b',(ROOT/'patch/offsets.inc').read_text(),re.M)}
 syms=symbols(B/'stock-demo')
 syms.update(PRIVATE_FUNCTIONS)
@@ -148,6 +149,17 @@ class Machine:
         self.calls.append((name,a,b,c))
         if name=='memcpy': self.u.mem_write(a,bytes(self.u.mem_read(b,c))); ret=a
         elif name=='memset': self.u.mem_write(a,bytes([b&255])*c); ret=a
+        elif name in ('table_row_create', 'button_create', 'image_create', 'view_create',
+                       'hscroll_label_create', 'gif_image_create'):
+            kind = {'gif_image_create': 'gif'}.get(name, name.removesuffix('_create'))
+            ret = self.node(kind)
+            for off, value in zip((O['W_X'], O['W_Y'], O['W_W'], O['W_H']),
+                                  (b, c, d, self.get(u.reg_read(UC_MIPS_REG_SP)+16))):
+                self.word(ret+off, value)
+            self.word(ret+O['W_PARENT'], a)
+            self.nodes[a]['children'].append(ret)
+        elif name=='widget_set_name': n['name']=self.text(b); ret=0
+        elif name=='widget_set_children_layout': n['children_layout']=self.text(b); ret=0
         elif name=='window_manager': ret=self.wm
         elif name=='window_manager_get_top_window': ret=self.top
         elif name=='window_manager_is_animating': ret=self.animating
@@ -500,6 +512,110 @@ def destroy(a,b):
     m.nodes.clear(); m.top=0
 m.on_click=destroy
 assert m.confirm()==11 and len(m.dispatched())==1; passed()
+
+# Execute native row-pool constructors, including the untouched album grid branch.
+for address in (0x523038, 0x4aa2cc, 0x4b0efc, 0x4a4ae8):
+    for grid in ((0, 1) if address == 0x4a4ae8 else (0,)):
+        m = Machine(); w = m.page('folder_page', 'table_client')
+        for name in ('table_row_create', 'button_create', 'image_create', 'view_create',
+                     'hscroll_label_create', 'gif_image_create', 'widget_use_style',
+                     'widget_set_name', 'widget_set_children_layout', 'image_set_draw_type',
+                     'image_base_set_image', 'set_hscroll_label_attribute'):
+            m.handlers[syms[name]] = name
+        m.word(syms['album_modetype'], grid)
+        assert m.call(address=address, args=(w, w, 4, 0)) == 0
+        rows = m.nodes[w]['children']
+        assert len(rows) == 4
+        for row in rows:
+            assert m.get(row+O['W_H']) == (210 if grid else 65 if variant == 'compact' else 78)
+            for button in m.nodes[row]['children']:
+                assert m.get(button+O['W_H']) == (160 if grid else 57 if variant == 'compact' else 70)
+        # Preparing an existing pool does not recreate or resize its rows.
+        before = len(m.nodes)
+        assert m.call(address=address, args=(w, w, 4, 0)) == 0 and len(m.nodes) == before
+passed()
+
+# Long Return executes the stock gates and release filter in both variants.
+def long_machine():
+    m = Machine()
+    for name in ('netdisk_folder_clear', 'navigator_back_to_home', 'awake_screen',
+                 'getFormatString', 'navigator_to_with_context', 'navigator_window_is_exist'):
+        m.handlers[syms[name]] = name
+    return m
+
+def long_return(m):
+    return m.call(170, address=syms['on_wm_keylong_fun'], event_type=0x111, gap=0)
+
+def destinations(m):
+    return [c for c in m.calls if c[0] in ('navigator_back_to_home', 'navigator_switch_to_with_context')]
+
+for page in ('home_page', 'folder_page', 'playing_page', 'sysset_page'):
+    m = long_machine(); m.page(page)
+    # No playback data is initialized: the switch must work with an empty queue as well.
+    assert long_return(m) == 0
+    dest = destinations(m)
+    assert len(dest) == 1
+    assert dest[0][0] == ('navigator_switch_to_with_context' if variant == 'compact' else 'navigator_back_to_home')
+    if variant == 'compact':
+        assert m.text(dest[0][1]) == 'playing_page'
+        assert [m.get(dest[0][2] + 4*i) for i in range(4)] == [0, 0, 255, 2]
+    assert m.call(170, gap=0) == 11  # handled hold swallows exactly the following release
+    assert m.call(170, gap=0) == 0   # next short Return still reaches stock Back
+    for _ in range(3):
+        assert long_return(m) == 0
+        assert len(destinations(m)) == 1
+    assert m.call(170, gap=0) == 11
+passed()
+
+# The stock long-key gates stay effective. Compact adds the shared navigation restrictions.
+for flag, value in [('g_poweroff_state', 2), ('g_lockscreen_pageflag', 1), ('g_testmode_flag', 1),
+                    ('g_backlight_status', 0), ('g_guideflag', 1), ('g_usblink_status', 2),
+                    ('bt__recv_pageflag', 1)]:
+    m = long_machine(); m.page('folder_page'); m.byte(syms[flag], value)
+    long_return(m)
+    # Stock itself blocks power-off, guide and test mode; compact adds the shared restrictions
+    # checked by usable(), so every listed flag blocks there. Stock ignores the rest on Return.
+    blocked = True if variant == 'compact' else flag in ('g_poweroff_state', 'g_guideflag', 'g_testmode_flag')
+    assert bool(destinations(m)) == (not blocked), flag
+for light in (0, 1):
+    for lock in (0, 1):
+        for mode in range(4):
+            m = long_machine(); m.page('folder_page')
+            m.byte(syms['g_backlight_status'], light)
+            m.byte(syms['g_keylock_flag'], lock); m.byte(syms['g_keylock_mode'], mode)
+            long_return(m)
+            blocked = not light and lock and mode in (2, 3)
+            if variant == 'compact': blocked = not light
+            assert bool(destinations(m)) == (not blocked)
+passed()
+if variant == 'compact':
+    m = long_machine(); m.page_list()
+    assert m.call(O['KEY_CENTER']) == 11 and m.timers
+    long_return(m)
+    assert not m.timers
+    m.advance(201)
+    assert not m.dispatched()
+    # A switch that returns failure must still consume the release without a second action.
+    m = long_machine(); m.page('playing_page'); m.animating = 1
+    long_return(m)
+    assert m.call(170, gap=0) == 11
+passed()
+# Other long-key paths remain byte-for-byte stock; exercise the inert keys and power gate.
+for key in (171, 172, 173, 222, 223, 218):
+    m = long_machine(); m.page('home_page')
+    if key == 218: m.byte(syms['g_poweroff_state'], 2)
+    m.call(key, address=syms['on_wm_keylong_fun'], event_type=0x111)
+    assert not destinations(m)
+passed()
+
+# Four complete compact rows resolve the same target for touch and centre at every row.
+for index in range(4):
+    m = Machine(); w, es = m.page_list(4, height=260, extent=260, name='folder_page')
+    for i, e in enumerate(es):
+        m.word(e+O['W_Y'], i*65); m.word(e+O['W_H'], 57)
+    m.touch(); m.click(es[index])
+    assert m.confirm() == 11 and m.dispatched()[0][1] == es[index]
+passed()
 
 # Recycle a small row pool: selection belongs to the logical index, never the widget.
 m=Machine(); w,rows,entries=m.table_page()
