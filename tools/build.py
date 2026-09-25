@@ -7,14 +7,13 @@ import argparse, hashlib, io, json, pathlib, re, struct, subprocess, tarfile, zi
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ZIP_SHA = '154c17822d09be001be35c03d2d3488424dee195221790bd70864480d55b0f00'
 DEMO_SHA = '2c5f06142850b4fc168f82b44a81550cce0a5b4b9fe1c179dced4a08a3049138'
-VERSION = 'V2.8R'
+VERSION = 'V2.9R'
 BASE = 0xb00000
 SCRATCH = 0xb0f000
 RING_STEP = 48
 HOOK = 0x4e85c8
 HOOKS = {
     'on_wm_keyup_before_fun': (HOOK, 'ringnav'),
-    'on_wm_keydown_before_fun': (0x4e8424, 'ringnav_keydown'),
     'on_wm_tsdown_before_fun': (0x4e8bd0, 'ringnav_touch'),
     'widget_on_paint_border': (0x6596a0, 'ringnav_paint'),
     'widget_dispatch': (0x65e0ec, 'ringnav_dispatch'),
@@ -120,9 +119,6 @@ FUNCTIONS = {
  'tk_strcmp': ('int', 'const char *, const char *'),
  'slide_menu_scroll_to_next': ('int', 'void *'),
  'slide_menu_scroll_to_prev': ('int', 'void *'),
- 'buzzeer_switch': ('int', 'int'),
- 'main_loop': ('void *', 'void'),
- 'main_loop_post_key_event': ('int', 'void *, int, unsigned'),
  'table_client_stop_animator_scroll': ('int', 'void *'),
  'table_client_set_yoffset': ('int', 'void *, int'),
  'scroll_view_set_offset': ('int', 'void *, int, int'),
@@ -136,7 +132,7 @@ PRIVATE_FUNCTIONS = {
 }
 GLOBALS = ['g_backlight_status', 'g_lockscreen_pageflag', 'g_testmode_flag',
            'g_guideflag', 'g_poweroff_state', 'g_usblink_status', 'bt__recv_pageflag',
-           'g_power_longkey', 'g_ingore_bootkey_flag', 'g_keytone_flag']
+           'g_power_longkey', 'g_ingore_bootkey_flag']
 # Audited stock browsing state (not playback state); sizes are checked against the ELF.
 CONTEXT_DATA = {'g_folder_path': 1024, 'g_class_type': 4,
                 'g_local_classinfo_save': 912, 'g_artist_type': 4, 'album_modetype': 4}
@@ -198,7 +194,7 @@ def build(zip_path, out, logo):
     syms = symbols(demo)
     syms.update(PRIVATE_FUNCTIONS)
     header = [f'#define RING_STEP {RING_STEP}']
-    for name in ('keyup', 'keydown', 'touch', 'paint', 'dispatch'):
+    for name in ('keyup', 'touch', 'paint', 'dispatch'):
         header += [f'extern int stock_{name}_trampoline(void *, void *);',
                    f'#define stock_{name} stock_{name}_trampoline']
     for name,(ret,args) in FUNCTIONS.items():
@@ -268,6 +264,16 @@ def build(zip_path, out, logo):
     line = re.search(rb'^release/assets/default/raw/images/xx/logo\.jpg R (\d+) (\d+) (\d+) (\d+) .+$', p, re.M)
     check(line is not None, 'Missing stock logo inode')
     replacement = b'release/assets/default/raw/images/xx/logo.jpg F '+b' '.join(line.groups())+b' cat '+shlex.quote(str(logo)).encode()
+    p = p[:line.start()]+replacement+p[line.end():]
+    # Ship the key tone off by default. The app copies this file to /mnt/data/config.ini only when
+    # that user copy does not exist, so an existing device keeps whatever the user set.
+    config = subprocess.check_output(['unsquashfs','-cat',str(sq),'release/assets/default/raw/config.ini'])
+    check(config.count(b'KEYTONE=1') == 1, 'Unexpected stock key tone default')
+    config_file = out/'config.ini'
+    config_file.write_bytes(config.replace(b'KEYTONE=1', b'KEYTONE=0'))
+    line = re.search(rb'^release/assets/default/raw/config\.ini R (\d+) (\d+) (\d+) (\d+) .+$', p, re.M)
+    check(line is not None, 'Missing stock config inode')
+    replacement = b'release/assets/default/raw/config.ini F '+b' '.join(line.groups())+b' cat '+shlex.quote(str(config_file)).encode()
     p = p[:line.start()]+replacement+p[line.end():]
     pseudo.write_bytes(p)
     (out/'empty').mkdir()

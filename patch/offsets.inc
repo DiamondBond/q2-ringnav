@@ -45,11 +45,6 @@
 #define KEY_NEXT 173
 #define KEY_PLAY 171
 #define BOOT_KEY_GUARD 0xa37c8a /* raw flag address, no symbol in the audited binary */
-/* Stock wheel lockout byte at 0xa37c89, no symbol in the audited binary: a key-down of Return,
- * Play/Pause, Centre, 222 or 223 writes 8, a 100 ms timer decrements it, and while it is positive
- * the stock key-up filter drops wheel releases. The payload reads it before holding a detent and
- * clears it when a button is released, so the wheel is not dead for up to 800 ms. */
-#define WHEEL_LATCH 0xa37c89
 
 /* slide_menu_scroll_to @0x5f3400 and completion @0x5f3654; animator
  * start @0x665ab0, time_elapse @0x6660d4, scroll_set_params @0x682124. */

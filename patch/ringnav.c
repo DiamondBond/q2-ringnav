@@ -11,10 +11,6 @@
 #define ACCEL_MS 140
 #define ACCEL2_HOLD_MS 300
 #define ACCEL3_HOLD_MS 600
-#define WHEEL_SETTLE_MS 25
-#define WHEEL_PAIR_MS 120
-#define WHEEL_PREV_BIT 1
-#define WHEEL_NEXT_BIT 2
 #define SHORT_LIST_MAX 16
 #define MAX_ENTRIES 512
 #define POS_MEM 64
@@ -49,12 +45,6 @@ typedef struct {
     unsigned last_wheel;  /* time of the previous wheel detent */
     int wheel_dir;        /* direction of that detent */
     unsigned wheel_run;   /* continuous same-direction milliseconds + 1; capped at the top threshold */
-    unsigned tick_timer;  /* settle timer of a held wheel detent; 0 when none */
-    unsigned tick_played; /* time the deferred tick last played; 0 when none */
-    int tick_key;         /* wheel key of the held detent */
-    int tick_release;     /* its release arrived; the settle decision still owns it */
-    int wheel_skip;       /* held-detent releases to drop, as WHEEL_*_BIT */
-    int replay_key;       /* a settle replay of this wheel release is in flight */
     int touch_mode;       /* session-wide drawing preference, independent of selection */
     void *wheel_top, *wheel_surface;
     unsigned wheel_scope;
@@ -866,77 +856,6 @@ int ringnav_dispatch(void *target, void *event) {
     return stock_dispatch(target, event);
 }
 
-static int wheel_bit(unsigned key) {
-    return key == KEY_PREV ? WHEEL_PREV_BIT : key == KEY_NEXT ? WHEEL_NEXT_BIT : 0;
-}
-
-/* Accept a held detent: click once, and replay a release that already arrived so the normal
- * key-up path still runs. A flush before its release leaves that release to the normal path. */
-static void accept_detent(void) {
-    unsigned key = (unsigned)st.tick_key;
-    int released = st.tick_release;
-    if (st.tick_timer) {
-        timer_remove(st.tick_timer);
-        st.tick_timer = 0;
-    }
-    st.tick_key = 0;
-    st.tick_release = 0;
-    buzzeer_switch(1);
-    st.tick_played = (unsigned)time_now_ms();
-    if (released) {
-        st.replay_key = (int)key;
-        main_loop_post_key_event(main_loop(), 0, key);
-    }
-}
-
-static int settle_detent(const void *info) {
-    (void)info;
-    st.tick_timer = 0; /* the one-shot timer is already gone */
-    accept_detent();
-    return 0;
-}
-
-/* The click wheel's capacitive touch and its buttons are independent input sources, so pressing
- * a button can deliver a phantom wheel detent next to the real one. Hold each detent for a
- * moment; a button key-down in that window drops it before it clicks or moves the list. */
-int ringnav_keydown(void *ctx, void *event) {
-    if (!event) return 0;
-    unsigned key = (unsigned)I(event, EVENT_KEY);
-    if (key != KEY_PREV && key != KEY_NEXT) {
-        if (st.tick_timer) {
-            /* The button owns this press: drop the detent, tick and step together. */
-            timer_remove(st.tick_timer);
-            st.tick_timer = 0;
-            st.wheel_skip |= wheel_bit((unsigned)st.tick_key);
-            st.tick_key = 0;
-            st.tick_release = 0;
-        } else if (st.tick_played &&
-                   (unsigned)time_now_ms() - st.tick_played <= WHEEL_PAIR_MS) {
-            /* The held detent already clicked; this button is its companion, so silence the
-             * stock tick rather than letting the pair sound twice. */
-            unsigned char tone = g_keytone_flag;
-            g_keytone_flag = 0;
-            int result = stock_keydown(ctx, event);
-            g_keytone_flag = tone;
-            st.tick_played = 0;
-            return result;
-        }
-        return stock_keydown(ctx, event);
-    }
-    if (*(volatile signed char *)WHEEL_LATCH > 0) {
-        /* The stock filter is already dropping wheel releases; do not click for them either. */
-        st.wheel_skip |= wheel_bit(key);
-        return 1;
-    }
-    if (st.tick_timer) accept_detent();
-    unsigned timer = timer_add(settle_detent, (void *)0, WHEEL_SETTLE_MS);
-    if (!timer) return stock_keydown(ctx, event); /* no hold available: behave stock */
-    st.tick_key = (int)key;
-    st.tick_release = 0;
-    st.tick_timer = timer;
-    return 1;
-}
-
 int ringnav(void *ctx, void *event) {
     /* The stock filter dereferences the event before returning. */
     if (!event) {
@@ -945,34 +864,18 @@ int ringnav(void *ctx, void *event) {
         st.home_surface = (void *)0;
         return 0;
     }
-    unsigned key = (unsigned)I(event, EVENT_KEY);
-    if (key == KEY_PREV || key == KEY_NEXT) {
-        if (key == (unsigned)st.replay_key)
-            st.replay_key = 0; /* a held release the settle timer accepted: act on it now */
-        else if (st.tick_timer && (int)key == st.tick_key && !st.tick_release) {
-            st.tick_release = 1; /* the settle decision still owns this release */
-            return STOP;
-        } else if (st.wheel_skip & wheel_bit(key)) {
-            st.wheel_skip &= ~wheel_bit(key);
-            cancel_center();
-            st.wheel_run = 0;
-            st.home_surface = (void *)0;
-            return STOP; /* a dropped detent's release must not move or click */
-        }
-    }
     int result = stock_keyup(ctx, event);
-    /* A button release ends the stock blanket wheel lockout; the settle window owns crosstalk. */
-    if (key != KEY_PREV && key != KEY_NEXT) *(volatile signed char *)WHEEL_LATCH = 0;
     if (result) {
         cancel_center();
-        if (key == KEY_PREV || key == KEY_NEXT) st.wheel_run = 0;
+        if (I(event, EVENT_KEY) == KEY_PREV || I(event, EVENT_KEY) == KEY_NEXT) st.wheel_run = 0;
         /* Keep the home interval independent of rejected list navigation. */
-        if (key == KEY_CENTER || !usable()) {
+        if (I(event, EVENT_KEY) == KEY_CENTER || !usable()) {
             st.wheel_run = 0;
             st.home_surface = (void *)0;
         }
         return result;
     }
+    unsigned key = (unsigned)I(event, EVENT_KEY);
     if (key != KEY_CENTER && key != KEY_PREV && key != KEY_NEXT) return result;
     if (key == KEY_CENTER) {
         st.wheel_run = 0;
