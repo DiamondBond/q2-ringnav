@@ -33,13 +33,17 @@
 #define LCD_FILL_COLOR 0xbc
 #define LCD_STROKE_COLOR 0xc0
 /* Selection outline tuning. RADIUS > 2 or the stock rounded path squares off; tests read these.
- * The shade uses the same stock dark surface as the fill at an alpha that keeps the white
- * outline above 3:1 on pure white art (0x99 is the floor); on dark rows it matches the stock
- * background exactly and disappears. */
+ * The shade uses the same stock dark surface as the fill at an alpha that keeps the outline
+ * above 3:1 on pure white art (0x99 is the floor); on dark rows it matches the stock background
+ * exactly and disappears. The line is translucent white at OUTLINE_ALPHA, so it reads as a soft
+ * grey on the dark theme instead of a hard white edge; lower OUTLINE_ALPHA or SHADE_ALPHA
+ * together and the contrast margin over bright art erodes. */
 #define RADIUS 9
 #define FILL_RGB 0x2b2b2b
 #define FILL_ALPHA 0x40
 #define SHADE_ALPHA 0xb3
+#define OUTLINE_RGB 0xffffff
+#define OUTLINE_ALPHA 0xb3
 #define KEY_CENTER 218
 #define KEY_PREV 172
 #define KEY_NEXT 173

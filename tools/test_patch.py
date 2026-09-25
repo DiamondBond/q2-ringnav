@@ -446,7 +446,7 @@ assert fill['color']==((O['FILL_ALPHA']<<24)|O['FILL_RGB']) and fill['radius']==
 assert shade['rect']==(1,1,238,46) and shade['bg']==0
 assert shade['color']==((O['SHADE_ALPHA']<<24)|O['FILL_RGB'])
 assert shade['radius']==O['RADIUS'] and shade['width']==1 and shade['clip']==(0,0,240,96)
-assert white['rect']==(2,2,236,44) and white['bg']==0 and white['color']==0xffffffff
+assert white['rect']==(2,2,236,44) and white['bg']==0 and white['color']==((O['OUTLINE_ALPHA']<<24)|O['OUTLINE_RGB'])
 assert white['radius']==O['RADIUS']-1 and white['width']==1
 assert not m.strokes and m.global_alpha==0
 assert m.clip==(0,0,240,240)
@@ -1190,7 +1190,7 @@ for off,val in [(0x10,10),(0x14,30),(0x18,229),(0x1c,199)]: m.word(m.canvas+off,
 m.paint(w)
 assert not m.rounded and [s[:4] for s in m.strokes]==[(8,21,238,18),(9,22,236,16)]
 assert m.strokes[0][4:]==((10,30,220,86),((O['SHADE_ALPHA']<<24)|O['FILL_RGB']))
-assert m.strokes[1][4:]==((10,30,220,86),0xffffffff)
+assert m.strokes[1][4:]==((10,30,220,86),((O['OUTLINE_ALPHA']<<24)|O['OUTLINE_RGB']))
 assert [m.get(m.canvas+off) for off in (0x10,0x14,0x18,0x1c)]==[10,30,229,199]
 assert m.get(m.lcd+O['LCD_STROKE_COLOR'])==0x12345678; passed()
 # Wheel selection is immediate even when restoration animations would still be running.
@@ -1253,7 +1253,7 @@ for ww,hh in [(240,20),(20,48),(6,6),(21,21)]:
         assert [r['kind'] for r in m.rounded]==['fill','stroke','stroke'] and not m.strokes,(ww,hh,m.rounded,m.strokes)
     else:
         assert not m.rounded and [s[:4] for s in m.strokes]==[(1,1,ww-2,hh-2),(2,2,ww-4,hh-4)]
-        assert [s[5] for s in m.strokes]==[((O['SHADE_ALPHA']<<24)|O['FILL_RGB']),0xffffffff]
+        assert [s[5] for s in m.strokes]==[((O['SHADE_ALPHA']<<24)|O['FILL_RGB']),((O['OUTLINE_ALPHA']<<24)|O['OUTLINE_RGB'])]
     assert m.global_alpha==0 and m.clip==(0,0,240,240)
     assert m.get(m.lcd+O['LCD_STROKE_COLOR'])==0x12345678; passed()
 m=Machine(); w=m.page(); m.word(w+O['W_H'],96)
@@ -1307,7 +1307,7 @@ m=Machine(); w,es=m.page_list(3,extent=1000); m.rounded_fail=True
 m.paint(w)
 assert [r['kind'] for r in m.rounded]==['fill','stroke'] and [s[:4] for s in m.strokes]==[(1,1,238,46),(2,2,236,44)]
 assert m.rounded[1]['color']==((O['SHADE_ALPHA']<<24)|O['FILL_RGB'])
-assert [s[5] for s in m.strokes]==[((O['SHADE_ALPHA']<<24)|O['FILL_RGB']),0xffffffff]
+assert [s[5] for s in m.strokes]==[((O['SHADE_ALPHA']<<24)|O['FILL_RGB']),((O['OUTLINE_ALPHA']<<24)|O['OUTLINE_RGB'])]
 assert m.get(m.lcd+O['LCD_FILL_COLOR'])==0x9abcdef0 and m.get(m.lcd+O['LCD_STROKE_COLOR'])==0x12345678
 assert m.global_alpha==0 and m.clip==(0,0,240,240); passed()
 
@@ -1424,7 +1424,7 @@ for active in (-1,0,1,2):
 # If the white rounded stroke fails, draw the square fallback as well.
 m=Machine(); w,es=m.page_list(3); m.rounded_fail=O['RADIUS']-1
 m.paint(w)
-assert [s[5] for s in m.strokes]==[((O['SHADE_ALPHA']<<24)|O['FILL_RGB']),0xffffffff]
+assert [s[5] for s in m.strokes]==[((O['SHADE_ALPHA']<<24)|O['FILL_RGB']),((O['OUTLINE_ALPHA']<<24)|O['OUTLINE_RGB'])]
 assert m.get(m.lcd+O['LCD_FILL_COLOR'])==0x9abcdef0
 assert m.get(m.lcd+O['LCD_STROKE_COLOR'])==0x12345678; passed()
 

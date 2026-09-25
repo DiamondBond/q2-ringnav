@@ -14,12 +14,13 @@
 #define SHORT_LIST_MAX 16
 #define MAX_ENTRIES 512
 #define POS_MEM 64
-/* RADIUS, FILL_RGB, FILL_ALPHA and SHADE_ALPHA come from offsets.inc; the colors pack their bytes
- * at compile time (little-endian r,g,b,a). The outline is opaque neutral white, never the playing
- * red, seated on a dark shade of the stock surface so bright album art cannot wash it out. */
+/* RADIUS, FILL_RGB, FILL_ALPHA, SHADE_ALPHA, OUTLINE_RGB and OUTLINE_ALPHA come from offsets.inc;
+ * the colors pack their bytes at compile time (little-endian r,g,b,a). The outline is translucent
+ * neutral white, never the playing red, seated on a dark shade of the stock surface so bright
+ * album art cannot wash it out. */
 #define FILL_COLOR ((FILL_ALPHA << 24) | FILL_RGB)
 #define SHADE_COLOR ((SHADE_ALPHA << 24) | FILL_RGB)
-#define OUTLINE_COLOR 0xffffffffu
+#define OUTLINE_COLOR ((OUTLINE_ALPHA << 24) | OUTLINE_RGB)
 #define I(p, o) (*(int *)((char *)(p) + (o)))
 #define P(p, o) (*(void **)((char *)(p) + (o)))
 #define B(p, o) (*(unsigned char *)((char *)(p) + (o)))
