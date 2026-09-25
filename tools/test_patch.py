@@ -5,7 +5,7 @@ Requires unicorn==2.1.4. Does not emulate the entire device or flash hardware.
 import json, math, pathlib, re, struct, sys
 from unicorn import Uc, UcError, UC_ARCH_MIPS, UC_MODE_MIPS32, UC_MODE_LITTLE_ENDIAN, UC_HOOK_CODE
 from unicorn.mips_const import *
-from build import segments, symbols, HOOK, HOOKS, FUNCTIONS, GLOBALS, CONTEXT_DATA, ROOT, source_sha256, sha
+from build import segments, symbols, HOOK, HOOKS, FUNCTIONS, GLOBALS, CONTEXT_DATA, ROOT, source_sha256, sha, PRIVATE_FUNCTIONS
 B=pathlib.Path(sys.argv[1] if len(sys.argv)>1 else 'build')
 manifest=json.loads((B/'manifest.json').read_text())
 if manifest.get('source_sha256') != source_sha256():
@@ -18,6 +18,7 @@ if f'**Latest firmware: {manifest["version"]}**' not in readme or f'shows `{mani
     raise SystemExit(f'README.md does not present {manifest["version"]} as the current firmware; update the version lines before testing')
 O={m.group(1):int(m.group(2),0) for m in re.finditer(r'^#define\s+(\w+)\s+(0x[0-9A-Fa-f]+|\d+)\b',(ROOT/'patch/offsets.inc').read_text(),re.M)}
 syms=symbols(B/'stock-demo')
+syms.update(PRIVATE_FUNCTIONS)
 VG_MOCKS=[n for n in syms if n.startswith(('vgcanvas_','vg_gradient_'))]
 
 def _fp64_fix():
@@ -61,6 +62,7 @@ class Machine:
         self.rebind=None; self.on_click=None; self.glide=True
         self.timers={}; self.next_timer=1; self.timer_fail=False; self.clicks=[]
         self.screens=[]
+        self.slides={}; self.slide_fail=False; self.slide_on_fail=False; self.slide_callbacks={}
         self.canvas=0x1000200; self.lcd=0x1000300; self.now=1000
         self.word(self.canvas+O['CANVAS_LCD'],self.lcd)
         self.word(self.lcd+O['LCD_FILL_COLOR'],0x9abcdef0)
@@ -68,6 +70,12 @@ class Machine:
         self.clip=(0,0,240,240)
         self.handlers={}
         for name in FUNCTIONS: self.handlers[syms[name]]=name
+        for name in ('slide_menu_item_width','slide_menu_on_scroll_done',
+                     'widget_animator_scroll_set_params','slide_menu_set_value'):
+            self.handlers.pop(syms[name],None)
+        for name in ('widget_is_instance_of','widget_animator_scroll_create','widget_animator_on',
+                     'widget_set_focused','widget_layout_children','event_init','value_set_int'):
+            self.handlers[syms[name]]=name
         if patched:
             for name in ('paint','dispatch'):
                 self.handlers[int(manifest['patch_symbols']['stock_'+name+'_trampoline'],16)]='stock_'+name
@@ -128,6 +136,9 @@ class Machine:
     def touch(self): return self.call(address=HOOKS['on_wm_tsdown_before_fun'][0])
     def click(self,w): return self.call(address=HOOKS['widget_dispatch'][0],args=(w,self.event,0,0),event_type=O['EVT_CLICK'])
     def hook(self,u,address,size,_):
+        if address==syms['widget_animator_scroll_set_params']:
+            assert u.reg_read(UC_MIPS_REG_A0) not in self.slides, 'retarget must pause first'
+            self.calls.append(('widget_animator_scroll_set_params',*[u.reg_read(r) for r in REGS[:3]]))
         if address not in self.handlers: return
         name=self.handlers[address]
         if not name.startswith('stock_'):
@@ -163,11 +174,34 @@ class Machine:
         elif name=='screen_action': self.screens.append(a); ret=1
         elif name=='tk_strcmp': ret=0 if a and b and self.text(a)==self.text(b) else -1
         elif name=='stock_dispatch':
-            self.clicks.append(a)
-            if self.on_click: self.on_click(a,b)
+            if self.get(b)==O['EVT_CLICK']:
+                self.clicks.append(a)
+                if self.on_click: self.on_click(a,b)
             ret=0
         elif name=='table_client_stop_animator_scroll': self.word(a+O['TABLE_ANIMATOR'],0); ret=0
-        elif name=='widget_animator_scroll_create': ret=self.alloc(0x80)
+        elif name=='widget_is_instance_of': ret=1
+        elif name=='widget_set_focused': n['focused']=b; ret=0
+        elif name=='event_init': self.word(a,b); ret=a
+        elif name=='value_set_int': self.word(a,b); ret=a
+        elif name=='widget_animator_scroll_create':
+            ret=0 if self.slide_fail else self.alloc(0x80)
+            if ret:
+                self.word(ret+4,a); self.word(ret+O['ANIM_DURATION'],b)
+                if self.nodes.get(a,{}).get('type')=='slide_menu': assert c==0 and d==O['SLIDE_EASING']
+        elif name=='widget_animator_on':
+            ret=0 if self.slide_on_fail else 1
+            if ret: self.slide_callbacks[a]=(c,d)
+        elif name=='widget_animator_pause': self.slides.pop(a,None); ret=0
+        elif name=='widget_animator_destroy':
+            self.slides.pop(a,None); self.slide_callbacks.pop(a,None); ret=0
+        elif name=='widget_animator_start':
+            if a in self.slide_callbacks:
+                w=self.get(a+4)
+                if self.nodes.get(w,{}).get('type')=='slide_menu':
+                    assert self.get(a+O['ANIM_ELAPSED'])==self.get(a+O['ANIM_START_TIME'])==0
+                    self.slides[a]=(self.now,self.get(a+O['ANIM_DURATION']),w,
+                                    signed(self.get(a+0x68)),signed(self.get(a+O['ANIM_X_TO'])))
+            ret=0
         elif name=='table_client_scroll_to':
             if self.glide:
                 self.word(a+O['TABLE_TOP'],b)
@@ -256,6 +290,14 @@ class Machine:
             self.word(info+0x20,ctx); self.word(info+0x28,tid)
             assert self.call(address=callback,args=(info,0,0,0),gap=0,clear=False)==0
         self.now=end
+        for a,(start,duration,w,origin,goal) in list(self.slides.items()):
+            elapsed=min(end-start,duration)
+            self.word(w+O['SLIDE_OFFSET'],round(origin+(goal-origin)*elapsed/duration))
+            self.word(a+O['ANIM_ELAPSED'],elapsed)
+            if elapsed==duration:
+                del self.slides[a]
+                callback,ctx=self.slide_callbacks.pop(a)
+                assert self.call(address=callback,args=(ctx,0,0,0),gap=0,clear=False)==7
     def confirm(self):
         """Single centre release followed by its full confirmation delay."""
         ret=self.call(O['KEY_CENTER'])
@@ -270,6 +312,10 @@ class Machine:
     def page(self,name='sysset_page',t='scroll_view'):
         child=self.node(t)
         self.top=self.node('window',name,[child])
+        if t=='slide_menu':
+            self.word(child+O['SLIDE_INDEX'],0)
+            self.nodes[child]['children']=[self.entry(child) for _ in range(7)]
+            self.word(child+0x5c,self.alloc()) # stock completion checks the child array
         return child
     def page_list(self,n=10,height=96,extent=960,name='sysset_page'):
         """A page holding one scroll view of n 48px entries; returns (surface, entries)."""
@@ -291,7 +337,7 @@ class Machine:
             self.nodes[r]['children']=[e]; self.word(r+O['W_PARENT'],w)
         self.bind(rs)
         return w,rs,es
-    def moved(self): return [x for x in self.calls if x[0] in ('scroll_view_scroll_delta_to','table_client_scroll_to','slide_menu_scroll_to_next','slide_menu_scroll_to_prev')]
+    def moved(self): return [x for x in self.calls if x[0] in ('scroll_view_scroll_delta_to','table_client_scroll_to','slide_menu_scroll_to_next','slide_menu_scroll_to_prev','widget_animator_scroll_set_params')]
     def dispatched(self): return [x for x in self.calls if x[0]=='stock_dispatch']
 
 checks=0
@@ -344,8 +390,8 @@ for field in ['animating','pressed']:
     m=Machine(); m.page(); setattr(m,field,1); assert m.call()==11 and not m.moved(); passed()
 
 m=Machine(); w=m.page('home_page','slide_menu')
-assert m.call()==11 and m.moved()[0][0]=='slide_menu_scroll_to_next'
-assert m.call(O['KEY_PREV'])==11 and m.moved()[0][0]=='slide_menu_scroll_to_prev'; passed()
+assert m.call()==11 and m.get(m.get(w+O['SLIDE_ANIMATOR'])+O['ANIM_X_TO'])==(-240&0xffffffff)
+assert m.call(O['KEY_PREV'])==11 and len(m.slides)==1; passed()
 m=Machine(); hidden=m.node(visible=0); shown=m.node(); pages=m.node('pages',children=[hidden,shown],active=1)
 m.top=m.node('window','artistinfo_page',[pages]); assert m.call()==11 and m.moved()[0][1]==shown; passed()
 m.nodes[hidden]['visible']=1
@@ -872,56 +918,111 @@ m.advance(1000); assert not m.clicks and not m.screens and not m.timers; passed(
 m=Machine(); m.page()
 assert m.release()==11 and m.release(100)==11
 assert not m.timers and not m.clicks and not m.screens; passed()
-# Home accepts at 0 and 200ms; dropped same-direction detents do not move the deadline.
-for first in (O['KEY_NEXT'],O['KEY_PREV']):
-    m=Machine(); m.now=0; w=m.page('home_page','slide_menu')
-    assert m.call(first,gap=0)==11 and len(m.moved())==1
-    assert m.call(first,gap=100)==11 and not m.moved()
-    assert m.call(first,gap=99)==11 and not m.moved()
-    assert m.call(first,gap=1)==11 and len(m.moved())==1
-    assert m.call(first,gap=199)==11 and not m.moved()
-    assert m.call(first,gap=1)==11 and len(m.moved())==1; passed()
-# Reversals are immediate and start a fresh same-direction interval, including clock wrap.
+# Audit the stock creation path independently: live offset, duration, easing,
+# completion address and deselection agree with the fields used by the patch.
+m=Machine(); w=m.page('home_page','slide_menu')
+m.call(address=0x5f3400,args=(w,-240,0,0),gap=0)
+a=m.get(w+O['SLIDE_ANIMATOR'])
+assert m.get(a+O['ANIM_DURATION'])==150 and signed(m.get(a+O['ANIM_X_TO']))==-240
+assert m.slide_callbacks[a]==(syms['slide_menu_on_scroll_done'],w)
+assert m.nodes[m.nodes[w]['children'][0]]['focused']==0
+m.advance(150); assert m.get(w+O['SLIDE_INDEX'])==1 and not m.slides; passed()
+
+# Execute native parameter writes and stock completion; only the scheduler is
+# deterministic. Check live origin, destination, duration, focus and one active animator.
+def slide(m,w):
+    a=m.get(w+O['SLIDE_ANIMATOR'])
+    assert a and list(m.slides)==[a]
+    return a,signed(m.get(a+0x68)),signed(m.get(a+O['ANIM_X_TO'])),m.get(a+O['ANIM_DURATION'])
+
 for start in (0,0xfffffff0):
-    for first,reverse in ((O['KEY_NEXT'],O['KEY_PREV']),(O['KEY_PREV'],O['KEY_NEXT'])):
-        m=Machine(); m.now=start; m.page('home_page','slide_menu')
-        assert m.call(first,gap=0)==11 and len(m.moved())==1
-        assert m.call(reverse,gap=100)==11 and len(m.moved())==1
-        assert m.moved()[0][0]==('slide_menu_scroll_to_next' if reverse==O['KEY_NEXT'] else 'slide_menu_scroll_to_prev')
-        assert m.call(reverse,gap=100)==11 and not m.moved()
-        assert m.call(reverse,gap=99)==11 and not m.moved()
-        assert m.call(reverse,gap=1)==11 and len(m.moved())==1
-        assert m.call(first,gap=1)==11 and len(m.moved())==1; passed()
-# A rejected reversal cannot change the accepted direction or deadline.
-for blocked in ('debounce','animating'):
-    m=Machine(); m.now=0; m.page('home_page','slide_menu'); m.call(gap=0)
-    if blocked=='debounce': m.byte(0xa37c89,1)
-    else: m.animating=1
-    assert m.call(O['KEY_PREV'],gap=50,debounce=True)==11 and not m.moved()
-    m.animating=0
-    assert m.call(gap=149)==11 and not m.moved()
-    assert m.call(gap=1)==11 and len(m.moved())==1; passed()
-# Events rejected by stock debounce or UI animation do not reset/extend the home gate.
-for blocked in ('debounce','animating'):
-    m=Machine(); m.now=0; m.page('home_page','slide_menu')
-    m.call(gap=0)
-    if blocked=='debounce': m.byte(0xa37c89,1)
-    else: m.animating=1
-    assert m.call(gap=50,debounce=True)==11 and not m.moved()
-    m.animating=0
-    assert m.call(gap=149)==11 and not m.moved()
-    assert m.call(gap=1)==11 and len(m.moved())==1; passed()
-# Touch, centre and leaving home reset the home gate; a different slide menu is not throttled.
-for action in ('touch','center','leave'):
-    m=Machine(); w=m.page('home_page','slide_menu'); home=m.top
-    m.call(gap=0)
+    for key,direction in ((O['KEY_NEXT'],1),(O['KEY_PREV'],-1)):
+        for count in (3,4,5):
+            m=Machine(); m.now=start; w=m.page('home_page','slide_menu')
+            assert m.call(key,gap=0)==11
+            a,origin,goal,duration=slide(m,w)
+            assert (origin,goal,duration)==(0,-direction*240,150)
+            for i in range(1,count):
+                m.advance(30); live=signed(m.get(w+O['SLIDE_OFFSET']))
+                assert m.call(key,gap=0)==11
+                assert slide(m,w)==(a,live,-direction*240*(i+1),75)
+            m.advance(75)
+            assert not m.slides and m.get(w+O['SLIDE_ANIMATOR'])==0
+            assert m.get(w+O['SLIDE_OFFSET'])==0
+            assert m.get(w+O['SLIDE_INDEX'])==(direction*count)%7
+            assert m.nodes[m.nodes[w]['children'][(direction*count)%7]]['focused']==1
+            m.advance(126); m.call(key,gap=0)
+            assert slide(m,w)[3]==150
+            m.advance(150); settled=m.get(w+O['SLIDE_INDEX']); m.advance(500)
+            assert m.get(w+O['SLIDE_INDEX'])==settled and not m.slides
+            passed()
+# Reversal at either speed starts at the live position and actually travels backward,
+# even when multiple intended destinations have accumulated.
+for fast in (False,True):
+    for key,reverse,sign in ((O['KEY_NEXT'],O['KEY_PREV'],1),(O['KEY_PREV'],O['KEY_NEXT'],-1)):
+        m=Machine(); w=m.page('home_page','slide_menu'); m.call(key,gap=0)
+        if fast:
+            for _ in range(3): m.call(key,gap=20)
+        m.advance(30); live=signed(m.get(w+O['SLIDE_OFFSET']))
+        a=m.get(w+O['SLIDE_ANIMATOR']); m.call(reverse,gap=0)
+        active,origin,goal,duration=slide(m,w)
+        assert active==a and origin==live and duration==150 and (goal-live)*sign>0
+        m.advance(150)
+        assert m.get(w+O['SLIDE_INDEX'])==(-goal//240)%7 and not m.slides
+        assert m.nodes[m.nodes[w]['children'][(-goal//240)%7]]['focused']==1
+        passed()
+# Exact fast-window boundary, stock rejection, and interaction resets.
+for gap,want in ((200,75),(201,150)):
+    m=Machine(); w=m.page('home_page','slide_menu'); m.call(gap=0); m.call(gap=gap)
+    assert slide(m,w)[3]==want; passed()
+for action in ('touch','center','click','leave','animating','pressed','unusable','missing'):
+    m=Machine(); w=m.page('home_page','slide_menu'); home=m.top; m.call(gap=0)
     if action=='touch': m.call(address=HOOKS['on_wm_tsdown_before_fun'][0],gap=20)
     elif action=='center': m.release(20)
-    else:
-        m.page('playing_page'); m.call(gap=20); m.top=home
-    assert m.call(gap=1)==11 and len(m.moved())==1; passed()
+    elif action=='click': m.call(address=HOOKS['widget_dispatch'][0],args=(m.nodes[w]['children'][0],m.event,0,0),event_type=O['EVT_CLICK'],gap=20)
+    elif action=='leave': m.page('playing_page'); m.call(gap=20); m.top=home
+    elif action=='unusable':
+        m.byte(syms['g_backlight_status'],0); m.call(gap=20); m.byte(syms['g_backlight_status'],1)
+    elif action=='missing': m.call(args=(m.wm,0,0,0),gap=20)
+    else: setattr(m,action,1); m.call(gap=20); setattr(m,action,0)
+    assert m.call(gap=1)==11 and slide(m,w)[3]==150; passed()
+m=Machine(); w=m.page('home_page','slide_menu'); m.call(gap=0)
+m.byte(0xa37c89,1); assert m.call(O['KEY_PREV'],gap=20,debounce=True)==11
+assert not m.moved(); m.call(gap=20); assert slide(m,w)[3]==75; passed()
+for count in (0,1):
+    m=Machine(); w=m.page('home_page','slide_menu'); m.nodes[w]['children']=m.nodes[w]['children'][:count]
+    for key in (O['KEY_NEXT'],O['KEY_PREV']):
+        assert m.call(key,gap=0)==11 and not m.slides
+    passed()
+# Resizing to an empty/single-icon menu cancels the active animator; empty completion
+# is also safe if no further wheel event arrives after the resize.
+for count in (0,1):
+    m=Machine(); w=m.page('home_page','slide_menu'); m.call(gap=0)
+    m.nodes[w]['children']=m.nodes[w]['children'][:count]
+    m.call(gap=20)
+    assert not m.slides and not m.get(w+O['SLIDE_ANIMATOR'])
+    m.advance(500); assert not m.get(w+O['SLIDE_OFFSET']); passed()
+m=Machine(); w=m.page('home_page','slide_menu'); m.call(gap=0)
+m.nodes[w]['children']=[]; m.advance(150)
+assert not m.slides and not m.get(w+O['SLIDE_ANIMATOR']); passed()
+# Animator and callback allocation failures settle through stock selection.
+for failure in ('slide_fail','slide_on_fail'):
+    m=Machine(); w=m.page('home_page','slide_menu'); setattr(m,failure,True)
+    m.call(gap=0)
+    assert m.get(w+O['SLIDE_INDEX'])==1 and not m.get(w+O['SLIDE_ANIMATOR'])
+    assert not m.slides and not m.slide_callbacks
+    assert m.nodes[m.nodes[w]['children'][1]]['focused']==1
+    setattr(m,failure,False); m.call(gap=20); assert slide(m,w)[3]==150; passed()
+# Centre arms the intended final icon while its slide is still unfinished.
+m=Machine(); w=m.page('home_page','slide_menu')
+for _ in range(5): m.call(gap=20)
+m.release(0); m.advance(75); m.advance(225)
+assert m.clicks==[m.nodes[w]['children'][5]] and not m.slides, (m.clicks,m.get(w+O['SLIDE_INDEX']),m.timers,m.slides); passed()
+m=Machine(); w=m.page('home_page','slide_menu'); m.release(0); m.call(gap=20)
+m.advance(300); assert not m.clicks; passed()
+# Other slide menus retain stock next/previous handling.
 m=Machine(); m.page('sysset_page','slide_menu')
-assert m.call(gap=0)==11 and m.call(gap=1)==11 and len(m.moved())==1; passed()
+assert m.call(gap=0)==11 and m.call(gap=1)==11 and m.moved(); passed()
 # Even if the UI services a release before an overdue timer, both singles confirm once.
 m=Machine(); w,es=m.page_list(3); m.release(); m.now+=301
 assert m.release()==11 and m.clicks==[es[0]] and len(m.timers)==1
@@ -953,18 +1054,14 @@ m.top=old; m.advance(300); assert not m.clicks and not m.timers; passed()
 m=Machine(); w=m.page('home_page','slide_menu'); home=m.top; m.call(gap=0)
 m.top=m.node('window','playing_page'); m.call(address=HOOKS['widget_on_paint_border'][0],
     args=(m.top,m.canvas,0,0),gap=20)
-m.top=home; assert m.call(gap=1)==11 and len(m.moved())==1; passed()
+m.top=home; assert m.call(gap=1)==11 and m.moved(); passed()
 # Local query and home selection changes invalidate pending confirmation too.
 m=Machine(); w,rs,es=m.table_page(); m.release()
 m.word(syms['g_class_type'],0xf002); m.advance(300); assert not m.clicks; passed()
 m=Machine(); w=m.page('home_page','slide_menu')
 m.word(w+O['SLIDE_INDEX'],0); m.nodes[w]['children']=[m.entry(w),m.entry(w)]
 m.release(); m.word(w+O['SLIDE_INDEX'],1); m.advance(300); assert not m.clicks; passed()
-# Unsigned milliseconds may wrap while a home interval or confirmation is pending.
-m=Machine(); m.now=0xfffffff0; m.page('home_page','slide_menu')
-assert m.call(gap=0)==11 and len(m.moved())==1
-assert m.call(gap=199)==11 and not m.moved()
-assert m.call(gap=1)==11 and len(m.moved())==1; passed()
+# Unsigned milliseconds may wrap while confirmation is pending.
 m=Machine(); m.now=0xfffffff0; m.page_list(3)
 assert m.release()==11 and m.release(299)==0
 m.advance(300); assert not m.clicks and m.screens==[0]; passed()
@@ -1343,7 +1440,7 @@ for home in (False,True):
     m.call(address=HOOKS['widget_dispatch'][0],args=(es[0 if home else 2],m.event,0,0),
            event_type=O['EVT_CLICK'],gap=50)
     assert m.call(gap=50)==11
-    if home: assert len(m.moved())==1
+    if home: assert slide(m,w)[3]==150
     else: assert m.selected(w)==3
     passed()
 

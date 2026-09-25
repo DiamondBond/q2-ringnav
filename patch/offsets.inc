@@ -45,3 +45,15 @@
 #define KEY_NEXT 173
 #define KEY_PLAY 171
 #define BOOT_KEY_GUARD 0xa37c8a /* raw flag address, no symbol in the audited binary */
+
+/* slide_menu_scroll_to @0x5f3400 and completion @0x5f3654; animator
+ * start @0x665ab0, time_elapse @0x6660d4, scroll_set_params @0x682124. */
+#define SLIDE_SPACER 0x84
+#define SLIDE_OFFSET 0x94
+#define SLIDE_ANIMATOR 0xc8
+#define ANIM_ELAPSED 0x10
+#define ANIM_START_TIME 0x18
+#define ANIM_DURATION 0x20
+#define ANIM_X_TO 0x60
+#define SLIDE_EASING 8          /* stock scroll_to easing */
+#define EVT_ANIM_END 0x125

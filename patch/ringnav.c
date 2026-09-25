@@ -5,7 +5,9 @@
 #define GLIDE_MS 300
 #define SCROLL_MARGIN 12
 #define DOUBLE_CLICK_MS 300
-#define HOME_WHEEL_MS 200
+#define HOME_FAST_WINDOW_MS 200
+#define HOME_SLIDE_MS 150
+#define HOME_FAST_SLIDE_MS 75
 #define ACCEL_MS 140
 #define ACCEL_DIV 3
 #define ACCEL_MAX 8
@@ -198,6 +200,88 @@ static void cancel_center(void) {
 static int is_home(void *top, void *w) {
     return top && w && kind(w) == 3 &&
            !tk_strcmp(widget_get_prop_str(top, "name", ""), "home_page");
+}
+
+/* The animator's destination is the intended icon, even before stock commits its index.
+ * Keep this widget-owned: touch and page recreation cannot leave a dangling animator here. */
+static int slide_index(void *w) {
+    void *a = P(w, SLIDE_ANIMATOR);
+    int n = (int)widget_count_children(w);
+    if (!n) return -1;
+    int id = I(w, SLIDE_INDEX);
+    int stride = slide_menu_item_width(w) + I(w, SLIDE_SPACER);
+    if (a && stride > 0) id -= I(a, ANIM_X_TO) / stride;
+    id %= n;
+    return id < 0 ? id + n : id;
+}
+
+static int home_done(void *w, void *event) {
+    if (widget_count_children(w)) {
+        slide_menu_on_scroll_done(w, event);
+        /* Stock skips focus restoration when a reversal returns to the original index. */
+        widget_set_focused(widget_get_child(w, I(w, SLIDE_INDEX)), 1);
+    } else {
+        I(w, SLIDE_OFFSET) = 0;
+        P(w, SLIDE_ANIMATOR) = (void *)0;
+    }
+    return 7; /* RET_REMOVE: same one-shot lifetime as stock completion */
+}
+
+static void home_step(void *w, int dir, unsigned now) {
+    int n = (int)widget_count_children(w);
+    int stride = slide_menu_item_width(w) + I(w, SLIDE_SPACER);
+    if (n <= 1 || stride <= 0) {
+        void *a = P(w, SLIDE_ANIMATOR);
+        if (a) {
+            widget_animator_pause(a);
+            widget_animator_destroy(a);
+            P(w, SLIDE_ANIMATOR) = (void *)0;
+            I(w, SLIDE_OFFSET) = 0;
+        }
+        if (n == 1) {
+            slide_menu_set_value(w, 0);
+            widget_set_focused(widget_get_child(w, 0), 1);
+        }
+        st.home_surface = (void *)0;
+        return;
+    }
+    int fast =
+        st.home_surface == w && st.home_dir == dir && now - st.last_home <= HOME_FAST_WINDOW_MS;
+    void *a = P(w, SLIDE_ANIMATOR);
+    int live = I(w, SLIDE_OFFSET);
+    int goal = a ? I(a, ANIM_X_TO) : 0;
+    /* Reversal discards the unfinished destination and heads to the adjacent card
+     * behind the live position. Same-direction ticks extend the intended destination. */
+    if (a && (goal - live) * dir > 0) {
+        goal = (live / stride) * stride;
+        if (dir > 0 ? goal >= live : goal <= live) goal -= dir * stride;
+    } else
+        goal -= dir * stride;
+    if (!a) {
+        a = widget_animator_scroll_create(w, HOME_SLIDE_MS, 0, SLIDE_EASING);
+        if (a && !widget_animator_on(a, EVT_ANIM_END, home_done, w)) {
+            widget_animator_destroy(a);
+            a = (void *)0;
+        }
+        P(w, SLIDE_ANIMATOR) = a;
+        if (!a) {
+            int id = (I(w, SLIDE_INDEX) - goal / stride) % n;
+            I(w, SLIDE_OFFSET) = 0;
+            slide_menu_set_value(w, id < 0 ? id + n : id);
+            widget_set_focused(widget_get_child(w, I(w, SLIDE_INDEX)), 1);
+            st.home_surface = (void *)0;
+            return;
+        }
+        widget_set_focused(widget_get_child(w, I(w, SLIDE_INDEX)), 0);
+    }
+    widget_animator_pause(a);
+    widget_animator_scroll_set_params(a, live, 0, goal, 0);
+    I(a, ANIM_ELAPSED) = I(a, ANIM_START_TIME) = 0;
+    I(a, ANIM_DURATION) = fast ? HOME_FAST_SLIDE_MS : HOME_SLIDE_MS;
+    widget_animator_start(a);
+    st.home_surface = w;
+    st.last_home = now;
+    st.home_dir = dir;
 }
 
 static int usable(void) {
@@ -541,7 +625,7 @@ static void reveal(menu_t *m, int id, int cancel) {
  * swipe never leaves the highlight pinned to the top edge. An interrupted recall glide is
  * retried once instead: the remembered row must not be silently replaced by a visible one. */
 static int reconcile(menu_t *m, int settle) {
-    int id = m->kind == 3 ? I(m->w, SLIDE_INDEX) : widget_get_prop_int(m->w, SEL, -1);
+    int id = m->kind == 3 ? slide_index(m->w) : widget_get_prop_int(m->w, SEL, -1);
     int cur = index_of(m, id);
     if (m->kind == 3) return cur;
     if (cur >= 0) {
@@ -586,7 +670,7 @@ static int reconcile(menu_t *m, int settle) {
  * the allocator reuses its address; text hashes reject a rebound item at the same index. */
 #define CONFIRM "_ringnav_confirm"
 static int pending_matches(void *top, menu_t *m) {
-    int id = m->kind == 3 ? I(m->w, SLIDE_INDEX) : widget_get_prop_int(m->w, SEL, -1);
+    int id = m->kind == 3 ? slide_index(m->w) : widget_get_prop_int(m->w, SEL, -1);
     int i = index_of(m, id);
     if (top != st.center_top || m->w != st.center_surface || m->scope != st.center_scope ||
         m->ctx != st.center_ctx || m->rows != st.center_rows || id != st.center_id || i < 0 ||
@@ -807,6 +891,7 @@ int ringnav(void *ctx, void *event) {
     if (window_manager_is_animating(wm) || window_manager_get_pointer_pressed(wm)) {
         cancel_center();
         st.wheel_run = 0;
+        st.home_surface = (void *)0;
         return STOP;
     }
     int dir = key == KEY_NEXT ? 1 : key == KEY_PREV ? -1 : 0;
@@ -815,6 +900,7 @@ int ringnav(void *ctx, void *event) {
     if (!w || !load(&g_menu, w, 1)) {
         cancel_center();
         st.wheel_run = 0;
+        st.home_surface = (void *)0;
         return dir ? STOP : result;
     }
     if (st.center_timer && !pending_matches(top, &g_menu)) cancel_center();
@@ -855,11 +941,9 @@ int ringnav(void *ctx, void *event) {
         return STOP;
     }
     if (is_home(top, w)) {
-        if (st.home_surface == w && st.home_dir == dir && now - st.last_home < HOME_WHEEL_MS)
-            return STOP;
-        st.home_surface = w;
-        st.last_home = now;
-        st.home_dir = dir;
+        home_step(w, dir, now);
+        widget_invalidate_force(w, (void *)0);
+        return STOP;
     }
     int step = wheel_step(&g_menu, top, dir, now);
     if (g_menu.kind == 3) {

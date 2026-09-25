@@ -95,6 +95,14 @@ FUNCTIONS = {
  'widget_get_child': ('void *', 'void *, unsigned'),
  'widget_set_prop_int': ('int', 'void *, const char *, int'),
  'widget_invalidate_force': ('int', 'void *, void *'),
+ 'widget_animator_start': ('int', 'void *'),
+ 'widget_animator_scroll_set_params': ('int', 'void *, int, int, int, int'),
+ 'slide_menu_set_value': ('int', 'void *, int'),
+ 'slide_menu_item_width': ('int', 'void *'),
+ 'slide_menu_on_scroll_done': ('int', 'void *, void *'),
+ 'widget_animator_scroll_create': ('void *', 'void *, unsigned, unsigned, int'),
+ 'widget_animator_on': ('unsigned', 'void *, unsigned, int (*)(void *, void *), void *'),
+ 'widget_set_focused': ('int', 'void *, int'),
  'widget_animator_pause': ('int', 'void *'),
  'widget_animator_destroy': ('int', 'void *'),
  'canvas_get_clip_rect': ('int', 'void *, void *'),
@@ -114,6 +122,11 @@ FUNCTIONS = {
  'table_client_stop_animator_scroll': ('int', 'void *'),
  'table_client_scroll_to': ('int', 'void *, int'),
  'scroll_view_scroll_delta_to': ('int', 'void *, int, int, int'),
+}
+# Local stock routines in the SHA-256-pinned V1.32 executable.
+PRIVATE_FUNCTIONS = {
+    "slide_menu_item_width": 0x5f3040,
+    "slide_menu_on_scroll_done": 0x5f3654,
 }
 GLOBALS = ['g_backlight_status', 'g_lockscreen_pageflag', 'g_testmode_flag',
            'g_guideflag', 'g_poweroff_state', 'g_usblink_status', 'bt__recv_pageflag',
@@ -177,6 +190,7 @@ def build(zip_path, out, logo):
         check(name in windows, f'Context {name} is not a window name in the stock rootfs')
     demo = out/'stock-demo'; demo.write_bytes(raw_demo)
     syms = symbols(demo)
+    syms.update(PRIVATE_FUNCTIONS)
     header = [f'#define RING_STEP {RING_STEP}']
     for name in ('keyup', 'touch', 'paint', 'dispatch'):
         header += [f'extern int stock_{name}_trampoline(void *, void *);',
