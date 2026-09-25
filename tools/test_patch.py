@@ -5,7 +5,7 @@ Requires unicorn==2.1.4. Does not emulate the entire device or flash hardware.
 import json, math, pathlib, re, struct, sys
 from unicorn import Uc, UcError, UC_ARCH_MIPS, UC_MODE_MIPS32, UC_MODE_LITTLE_ENDIAN, UC_HOOK_CODE
 from unicorn.mips_const import *
-from build import segments, symbols, HOOK, HOOKS, FUNCTIONS, GLOBALS, CONTEXT_DATA, ROOT, source_sha256, sha, PRIVATE_FUNCTIONS, VERSIONS
+from build import segments, symbols, HOOK, HOOKS, FUNCTIONS, GLOBALS, CONTEXT_DATA, ROOT, source_sha256, sha, PRIVATE_FUNCTIONS, VERSIONS, DEV_VERSIONS
 B=pathlib.Path(sys.argv[1] if len(sys.argv)>1 else 'build')
 manifest=json.loads((B/'manifest.json').read_text())
 if manifest.get('source_sha256') != source_sha256():
@@ -14,7 +14,8 @@ for name,key in (('demo','demo_sha256'),('stock-demo','stock_demo_sha256'),('pat
     if sha((B/name).read_bytes()) != manifest.get(key):
         raise SystemExit(f'{B/name} does not match manifest.json; rebuild into a fresh directory')
 variant = manifest.get('variant')
-assert variant in VERSIONS and manifest['version'] == VERSIONS[variant], 'Wrong variant/version'
+assert variant in VERSIONS and manifest['version'] == (
+    DEV_VERSIONS if manifest.get('dev') else VERSIONS)[variant], 'Wrong variant/version'
 assert (manifest.get('changed_assets') != {}) == (variant == 'compact')
 assert (manifest.get('compact_code') != []) == (variant == 'compact')
 O={m.group(1):int(m.group(2),0) for m in re.finditer(r'^#define\s+(\w+)\s+(0x[0-9A-Fa-f]+|\d+)\b',(ROOT/'patch/offsets.inc').read_text(),re.M)}
@@ -514,6 +515,18 @@ m.on_click=destroy
 assert m.confirm()==11 and len(m.dispatched())==1; passed()
 
 # Execute native row-pool constructors, including the untouched album grid branch.
+# The 52px artwork keeps the stock nine-pixel inset in normal; compact keeps that same 52px
+# artwork at natural size (no rescaling) and gives it an even eight-pixel inset on all four
+# sides of the 68px row body. The playing overlay follows.
+ARTWORK = {
+    0x523038: [('img_icon', (4, 9, 52, 52), (0, 8, 52, 52)),
+               ('git_playing', (0, 9, 52, 52), (0, 8, 52, 52))],
+    0x4aa2cc: [('img_icon', (48, 0, 50, 70), (48, 0, 52, 68)),
+               ('img_gifbg', (0, 9, 50, 52), (0, 8, 50, 52))],
+    0x4b0efc: [('img_icon', (48, 0, 50, 70), (48, 0, 52, 68))],
+    0x4a4ae8: [('img_icon', (48, 0, 50, 70), (48, 0, 52, 68)),
+               ('img_gifbg', (0, 9, 50, 52), (0, 8, 50, 52))],
+}
 for address in (0x523038, 0x4aa2cc, 0x4b0efc, 0x4a4ae8):
     for grid in ((0, 1) if address == 0x4a4ae8 else (0,)):
         m = Machine(); w = m.page('folder_page', 'table_client')
@@ -527,9 +540,16 @@ for address in (0x523038, 0x4aa2cc, 0x4b0efc, 0x4a4ae8):
         rows = m.nodes[w]['children']
         assert len(rows) == 4
         for row in rows:
-            assert m.get(row+O['W_H']) == (210 if grid else 65 if variant == 'compact' else 78)
+            assert m.get(row+O['W_H']) == (210 if grid else 72 if variant == 'compact' else 78)
             for button in m.nodes[row]['children']:
-                assert m.get(button+O['W_H']) == (160 if grid else 57 if variant == 'compact' else 70)
+                assert m.get(button+O['W_H']) == (160 if grid else 68 if variant == 'compact' else 70)
+        if not grid:
+            for name, stock, compact_geometry in ARTWORK[address]:
+                arts = [n for n, v in m.nodes.items() if v.get('name') == name]
+                assert arts, name
+                for art in arts:
+                    geometry = tuple(signed(m.get(art+O[off])) for off in ('W_X', 'W_Y', 'W_W', 'W_H'))
+                    assert geometry == (compact_geometry if variant == 'compact' else stock), (name, geometry)
         # Preparing an existing pool does not recreate or resize its rows.
         before = len(m.nodes)
         assert m.call(address=address, args=(w, w, 4, 0)) == 0 and len(m.nodes) == before
@@ -610,9 +630,9 @@ passed()
 
 # Four complete compact rows resolve the same target for touch and centre at every row.
 for index in range(4):
-    m = Machine(); w, es = m.page_list(4, height=260, extent=260, name='folder_page')
+    m = Machine(); w, es = m.page_list(4, height=288, extent=288, name='folder_page')
     for i, e in enumerate(es):
-        m.word(e+O['W_Y'], i*65); m.word(e+O['W_H'], 57)
+        m.word(e+O['W_Y'], i*72); m.word(e+O['W_H'], 68)
     m.touch(); m.click(es[index])
     assert m.confirm() == 11 and m.dispatched()[0][1] == es[index]
 passed()

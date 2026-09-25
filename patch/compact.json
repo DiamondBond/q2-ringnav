@@ -71,19 +71,37 @@
       ]
     },
     {
-      "value": 2,
-      "purpose": "centre 52px artwork in 57px body",
+      "value": "art",
+      "purpose": "stock 52px artwork drawn 1:1 in the inset row widget",
+      "sites": [
+        ["0x4a4c70", "0x24070032"],
+        ["0x4aa42c", "0x24070032"],
+        ["0x4adfec", "0x24070032"],
+        ["0x4b1058", "0x24070032"]
+      ]
+    },
+    {
+      "value": "art_inset",
+      "purpose": "artwork and playing overlay at the 8px top/left inset",
       "sites": [
         ["0x4a4ce4", "0x24060009"],
         ["0x4aa4a4", "0x24060009"],
         ["0x4ae05c", "0x24060009"],
         ["0x5231c4", "0x24060009"],
-        ["0x523234", "0x24060009"]
+        ["0x523234", "0x24060009"],
+        ["0x524944", "0x2405000a"]
       ]
     },
     {
-      "value": 7,
-      "purpose": "24px title position, font unchanged",
+      "value": 0,
+      "purpose": "folder artwork on the row layout's 8px left margin",
+      "sites": [
+        ["0x5231cc", "0x24050004"]
+      ]
+    },
+    {
+      "value": 13,
+      "purpose": "24px title position in the 68px body, font unchanged",
       "sites": [
         ["0x4a4d9c", "0x2406000e"],
         ["0x4a6580", "0x2406000e"],
@@ -91,16 +109,16 @@
       ]
     },
     {
-      "value": 7,
-      "purpose": "title position, font unchanged",
+      "value": 10,
+      "purpose": "title position in the 68px body, font unchanged",
       "sites": [
         ["0x4ae314", "0x2406000b"],
         ["0x4b2bd4", "0x2406000b"]
       ]
     },
     {
-      "value": 33,
-      "purpose": "16px metadata position, font unchanged",
+      "value": 39,
+      "purpose": "16px metadata position in the 68px body, font unchanged",
       "sites": [
         ["0x4a4e04", "0x24060028"],
         ["0x4a661c", "0x24060028"],
@@ -109,15 +127,15 @@
       ]
     },
     {
-      "value": 33,
-      "purpose": "playlist count position",
+      "value": 40,
+      "purpose": "playlist count position in the 68px body",
       "sites": [
         ["0x4b2c38", "0x24060029"]
       ]
     },
     {
-      "value": 210,
-      "purpose": "all songs recreated scrollbar matches retained Play All bar",
+      "value": "scroll",
+      "purpose": "all songs recreated scrollbar spans the relocated list",
       "sites": [
         ["0x4a8cd8", "0x240200be"]
       ]

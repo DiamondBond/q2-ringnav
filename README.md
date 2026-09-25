@@ -30,10 +30,10 @@ If the UI is not working, use [Shanling's recovery package](https://drive.google
 
 `Q2.Firmware.V3.2.zip` keeps the normal UI and existing controls, including long Return → Home.
 `Q2.Firmware.V3.2-compact.zip` hides the primary toolbar in Folder and Local Songs browsing and
-uses 65-pixel rows: ordinary lists fit four complete rows with stock fonts. Separate action
-bars, Play All/sort, tabs, editing controls and album grid modes remain; these can show fewer
-entries. Settings, online services, Now Playing, home and dialogs keep their stock layouts.
-The folder artwork setting and saved preferences remain intact.
+uses 72-pixel rows with the stock artwork drawn at its natural size and an even eight-pixel
+inset: ordinary lists fit four complete rows with stock fonts. Separate action bars, Play All/sort, tabs, editing controls and album grid modes remain;
+these can show fewer entries. Settings, online services, Now Playing, home and dialogs keep
+their stock layouts. The folder artwork setting and saved preferences remain intact.
 
 Compact long Return opens Now Playing without restarting playback, including when already
 playing; its release is consumed. Short Return keeps stock Back and nested folder traversal.
@@ -60,7 +60,7 @@ If you find a menu where something behaves strangely, please open an issue and s
 
 ## Changelog
 
-- **V3.2R / V3.2C**: Version bump over V3.1; navigation, compact browsing and all other behavior are unchanged. The compact audit and release tooling were trimmed.
+- **V3.2R / V3.2C**: Compact rows now fill the client area with 72-pixel rows, so the stock artwork keeps its natural size with an even eight-pixel inset instead of being scaled down. Navigation and all other behavior are unchanged.
 
 - **V3.1R / V3.1C**: Shared normal and compact builds, compact local lists and long Return to Now Playing, and a reproducible dual-variant release procedure.
 
@@ -135,10 +135,15 @@ SHA-256 of the stock Shanling Q2 V1.32 firmware ZIP.
 ```sh
 python3 tools/build.py 'Q2 Firmware V1.32.zip' --out /tmp/q2-build
 python3 tools/build.py 'Q2 Firmware V1.32.zip' --out /tmp/q2-compact --compact
+python3 tools/build.py 'Q2 Firmware V1.32.zip' --out /tmp/q2-dev --compact --dev  # V3.3C test build
 python3 tools/test_build.py  # JPEG header checks; no emulator required
 python3 tools/test_build.py 'Q2 Firmware V1.32.zip'  # optional packaging/reproducibility checks
 python3 tools/test_patch.py /tmp/q2-build  # after: pip install -r requirements.txt
 ```
+
+`--dev` tags a build with the temporary higher version `V3.3R`/`V3.3C` so a test unit is
+distinguishable from the released `V3.2R`/`V3.2C` it replaces. It applies to that build only:
+the release procedure never passes `--dev`, and the manifest records `dev: true`.
 
 The suite executes the actual patched MIPS payload and stock key/touch filters. UI services are mocked; carousel checks execute native animator parameter writes and stock completion, with a deterministic animation scheduler, and audit the stock creation path. Separate scenarios execute the stock canvas clip/color/rectangle code and the stock rounded fill/stroke entry points down to mocked LCD and vgcanvas sinks.
 

@@ -8,6 +8,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 ZIP_SHA = '154c17822d09be001be35c03d2d3488424dee195221790bd70864480d55b0f00'
 DEMO_SHA = '2c5f06142850b4fc168f82b44a81550cce0a5b4b9fe1c179dced4a08a3049138'
 VERSIONS = {'normal': 'V3.2R', 'compact': 'V3.2C'}
+DEV_VERSIONS = {'normal': 'V3.3R', 'compact': 'V3.3C'}
 BASE = 0xb00000
 SCRATCH = 0xb0f000
 RING_STEP = 48
@@ -153,9 +154,9 @@ def compile_payload(out, compact=False):
     run('llvm-objcopy','-O','binary',out/'patch.elf',out/'patch.bin')
     return symbols(out/'patch.elf')
 
-def build(zip_path, out, logo, compact=False):
+def build(zip_path, out, logo, compact=False, dev=False):
     variant = 'compact' if compact else 'normal'
-    version = VERSIONS[variant]
+    version = (DEV_VERSIONS if dev else VERSIONS)[variant]
     out.mkdir(parents=True, exist_ok=True)
     check(not (out/'update.tar').exists(), 'Output already exists; use a fresh --out directory')
     source = source_sha256()
@@ -309,7 +310,7 @@ def build(zip_path, out, logo, compact=False):
         rootfs_sha256=sha(newsq.read_bytes()), kernel_sha256=sha(blobs['recovery-update/xImage']),
         hook_address=hex(HOOK), hook_file_offset=hex(hookoff), patch_address=hex(BASE),
         patch_file_offset=hex(appendoff), patch_bytes=len(payload), ring_step_pixels=RING_STEP,
-        version=version, variant=variant, compact_code=code_changes, changed_assets=changed_assets, hooks=hooks, logo_sha256=sha(logo_data),
+        version=version, variant=variant, dev=dev, compact_code=code_changes, changed_assets=changed_assets, hooks=hooks, logo_sha256=sha(logo_data),
         patch_symbols={n:hex(v) for n,v in ps.items() if n.startswith('stock_')},
         tools={t:run(t,'--version').splitlines()[0] for t in ['clang','ld.lld','llvm-objcopy']})
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
@@ -322,8 +323,10 @@ if __name__ == '__main__':
     ap.add_argument('--logo',type=pathlib.Path,default=ROOT/'assets/logo.jpg',
                     help='320x375 JPEG boot splash (default: assets/logo.jpg)')
     ap.add_argument('--compact', action='store_true', help='compact local browsing and long Return to Now Playing')
+    ap.add_argument('--dev', action='store_true',
+                    help='development build: temporary higher version tag (V3.3R/V3.3C); never a release input')
     a=ap.parse_args()
     try:
-        build(a.zip,a.out.resolve(),a.logo,a.compact)
+        build(a.zip,a.out.resolve(),a.logo,a.compact,a.dev)
     except (OSError, ValueError, zipfile.BadZipFile, subprocess.CalledProcessError) as exc:
         ap.error(str(exc))

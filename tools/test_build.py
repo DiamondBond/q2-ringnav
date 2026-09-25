@@ -28,8 +28,8 @@ print('JPEG header regression checks passed.')
 
 def validate_assets(directory):
     import json, subprocess
-    from build import sha, run, fileoff, VERSIONS
-    from compact import AUDIT, PITCH, decode, patch_asset, patch_code
+    from build import sha, run, fileoff
+    from compact import AUDIT, BOTTOM, PITCH, decode, patch_asset, patch_code
     manifest = json.loads((directory/'manifest.json').read_text())
     compact = manifest['variant'] == 'compact'
     stock = (directory/'stock-demo').read_bytes()
@@ -41,7 +41,7 @@ def validate_assets(directory):
             off = fileoff(stock, int(address, 16))
             if not compact:
                 assert demo[off:off+4] == stock[off:off+4]
-    assert VERSIONS[manifest['variant']].encode()+b'\0' in demo
+    assert manifest['version'].encode()+b'\0' in demo
     changed = manifest['changed_assets']
     assert set(changed) == ({'release/assets/default/raw/ui/'+p for p in AUDIT['assets']} if compact else set())
     def read(image, rel):
@@ -70,7 +70,8 @@ def validate_assets(directory):
                 if 'font' in key or key == 'style': assert node[2][key] == value
         if short in ('folder_page.bin', 'localmusic_page.bin', 'localmusic/localclass_page.bin', 'localmusic/playlist_page.bin'):
             surface = next(n for n in root[3] if n[0] in ('list_view', 'table_view'))
-            assert surface[1][1:] == [0, 375, 4*PITCH]
+            assert surface[1][1:] == [0, 375, BOTTOM], 'Lists must fill the client area'
+            assert 4*PITCH <= BOTTOM, 'Four complete rows must fit'
         # Corrupt inputs must be rejected, never silently patched.
         try: patch_asset(short, original[:-1]+b'x')
         except ValueError: pass

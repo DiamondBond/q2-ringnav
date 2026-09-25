@@ -9,8 +9,14 @@ import pathlib
 import struct
 
 AUDIT = json.loads((pathlib.Path(__file__).resolve().parents[1]/'patch/compact.json').read_text())
-PITCH = 65
-BODY = PITCH - 8
+# The app window is the 375x320 screen minus the 30px status bar, so a 290px list holds four
+# 72px rows. The stock 52px artwork is drawn 1:1 (no rescaling) with an 8px inset inside the
+# 68px row body. Rows keep the row layout's eight-pixel left margin for the artwork.
+BOTTOM = 290
+PITCH = 72
+BODY = PITCH - 4
+ART = 52
+ART_INSET = (BODY - ART) // 2
 
 
 def require(ok, message):
@@ -78,7 +84,7 @@ def patch_asset(path, data):
         if kind in ('list_view', 'table_view', 'tab_control'):
             require(g[1] in (50, 100), f'{path}: unexpected list position')
             g[1] -= 50
-            g[3] = 260 - g[1]
+            g[3] = BOTTOM - g[1]
         elif props.get('name') == 'view_navbar_allplay':
             require(g == [0, 50, 375, 50], f'{path}: unexpected action bar')
             g[1] = 0
@@ -98,21 +104,18 @@ def patch_asset(path, data):
                 g[3] = PITCH
             elif g[3] == 70:
                 g[3] = BODY
-            if g[1] in (40, 41):
-                g[1] = 33
-            elif g[1] in (11, 14):
-                g[1] = 7
-            elif g[1] == 21:
-                g[1] = 14
+            if g[1] in (11, 14, 21, 40, 41):
+                # titles and metadata keep their stock centring: the body shrank by two pixels
+                g[1] -= 1
             elif g[1] in (9, 10) and kind == 'image':
-                g[1] = 2
+                g[1] = ART_INSET
         if path == 'localmusic/artistinfo_page.bin':
             if kind == 'pages':
                 require(props.get('self_layout') == 'default(x=0,y=40,w=100%,h=170)', 'Unexpected tabs layout')
-                props['self_layout'] = 'default(x=0,y=40,w=100%,h=220)'
-                g[3] = 220
+                props['self_layout'] = f'default(x=0,y=40,w=100%,h={BOTTOM - 40})'
+                g[3] = BOTTOM - 40
             if props.get('name') == 'list_view_album':
-                g[3] = 220
+                g[3] = BOTTOM - 40
         for child in children:
             rows(child, in_row)
     rows(root)
@@ -129,7 +132,8 @@ def patch_code(data, fileoff, symbols):
         changes.append(dict(address=hex(address), original=hex(old), patched=hex(new), purpose=purpose))
 
     for group in AUDIT['immediates']:
-        value = {'pitch': PITCH, 'body': BODY}.get(group['value'], group['value'])
+        value = {'pitch': PITCH, 'body': BODY, 'art': ART, 'art_inset': ART_INSET,
+                 'scroll': BOTTOM - 50}.get(group['value'], group['value'])
         for address, instruction in group['sites']:
             old = int(instruction, 16)
             word(int(address, 16), old, (old & 0xffff0000) | value, group['purpose'])

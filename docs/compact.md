@@ -13,13 +13,16 @@ local assets are accepted. The primary `view_navbar` stays allocated but invisib
 and disabled, including dynamically recreated children. Separate action bars are
 moved into its space. The global status bar is outside these assets.
 
-`PITCH = 65` is shared by all build-time row geometry edits, native row-height
-resets and artwork offset divisors. Row bodies remain eight pixels shorter than
-pitch. Font/style definitions are untouched. The 52-pixel artwork fits within the
-57-pixel row body; its inset changes from nine to two pixels. The stock image draw
-mode and cover loaders remain responsible for proportional artwork and missing
-image fallback. Full-height text/icon containers are shortened with their button.
-Titles and metadata keep their heights, with adjusted vertical positions.
+`PITCH = 72` is shared by all build-time row geometry edits, native row-height
+resets and artwork offset divisors. Four rows fit the 290-pixel client area below
+the status bar, so `BOTTOM = 290` replaces the stock lists' 260-pixel content
+bottom. Row bodies are `PITCH - 4` pixels, and the stock 52-pixel artwork is
+drawn at natural size (`ART = 52`) with `ART_INSET = 8` on all four sides: the
+artwork never rescales, so glyphs and covers stay as sharp as stock, and the row
+layout's eight-pixel left margin seats the artwork exactly. ART_INSET also
+positions the playing overlay. Font/style definitions are untouched. Full-height
+text/icon containers are shortened with their button. Titles and metadata keep
+their stock centring, one pixel higher for the two-pixel-shorter body.
 
 Native local row-pool constructors are at 0x523038 (folder), 0x4aa2cc (songs),
 0x4b0efc (local categories) and 0x4a4ae8 (album list/grid). The album grid branch
@@ -27,7 +30,7 @@ is unchanged. Album detail, artist track and playlist constructors have their ow
 explicit sites in the audit. Folder reset at 0x5217d4, return offset division at
 0x521a84 and scrolling cover division at 0x5228f8 all use the same compact pitch.
 The category cover callback originally divides by 120 despite using 78-pixel
-rows; compact corrects its audited divisor at 0x4b0608 to 65. Rebinding and delayed
+rows; compact corrects its audited divisor at 0x4b0608 to 72. Rebinding and delayed
 cover callbacks keep the same widget geometry and saved cover preferences.
 
 The stock long-key function at 0x4e873c retains all instructions except the final
@@ -51,8 +54,9 @@ Run this over both builds when validating a release.
   its space after page recreation and nested folder returns. Normal stays stock.
 - **artwork**: Toggle folder icons/covers off/on, restart to verify saved settings,
   and try missing covers, square/non-square art, fast scrolling and recycled rows.
-  Check late-arriving covers, alignment, no overlap and correct artwork indexing
-  after child/grandchild returns. Test both saved album display modes.
+  Check late-arriving covers, the even inset and sharpness around artwork, alignment, no overlap
+  and correct artwork indexing after child/grandchild returns. Test both saved
+  album display modes.
 - **return**: Short Return traverses folders and other pages as stock. Hold Return
   and release, repeat holds, try already playing and an empty playback queue.
   Compact opens/stays on Now Playing without restarting audio; normal opens Home.

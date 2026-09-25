@@ -15,11 +15,9 @@ from build import ROOT, VERSIONS, ZIP_SHA, DEMO_SHA, build, check, run, sha, sou
 
 TAG = '3.2R'
 ASSETS = {'normal': 'Q2.Firmware.V3.2.zip', 'compact': 'Q2.Firmware.V3.2-compact.zip'}
-NOTES = '''- Same navigation and compact behavior as V3.1R/V3.1C, version display updated to V3.2R/V3.2C.
-- Ships two builds from the same patch: Q2.Firmware.V3.2.zip (V3.2R, normal UI and controls) and Q2.Firmware.V3.2-compact.zip (V3.2C, compact local browsing).
-- Compact hides the primary toolbar in Folder and Local Songs, fits four complete 65-pixel rows in ordinary lists with stock fonts, and keeps the separate action bars, Play All/sort controls, tabs, editing controls and album grid modes. Settings, online services, Now Playing, home and dialogs stay stock.
-- Compact long Return opens Now Playing without restarting playback and consumes its release; short Return keeps stock Back, including nested folders. Normal keeps short and long Return stock. Other long presses are unchanged.
-- Wheel navigation, acceleration, physical selection, position memory, lock/screen/power gates and saved preferences are shared by both builds.
+NOTES = '''- Q2.Firmware.V3.2.zip: normal UI and controls (V3.2R). Q2.Firmware.V3.2-compact.zip: compact local browsing (V3.2C).
+- Compact hides the primary toolbar in Folder and Local Songs, fits four complete rows in ordinary lists with stock fonts, and keeps the stock artwork at natural size with an even eight-pixel inset.
+- Wheel navigation, position memory, the selection outline and saved settings are shared; compact long Return opens Now Playing, short Return keeps stock Back.
 '''
 
 
