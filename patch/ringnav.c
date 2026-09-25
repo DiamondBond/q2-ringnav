@@ -8,9 +8,9 @@
 #define HOME_FAST_WINDOW_MS 200
 #define HOME_SLIDE_MS 200
 #define HOME_FAST_SLIDE_MS 120
-#define ACCEL_MS 140
-#define ACCEL2_HOLD_MS 300
-#define ACCEL3_HOLD_MS 600
+#define WHEEL_RUN_MS 140
+#define WHEEL_RAMP_MS 100
+#define WHEEL_MAX_STEP 8
 #define SHORT_LIST_MAX 16
 #define MAX_ENTRIES 512
 #define POS_MEM 64
@@ -44,7 +44,7 @@ typedef struct {
     void *center_surface; /* navigation surface of that press */
     unsigned last_wheel;  /* time of the previous wheel detent */
     int wheel_dir;        /* direction of that detent */
-    unsigned wheel_run;   /* continuous same-direction milliseconds + 1; capped at the top threshold */
+    unsigned wheel_run;   /* continuous same-direction spin ms + 1; capped at full speed */
     int touch_mode;       /* session-wide drawing preference, independent of selection */
     void *wheel_top, *wheel_surface;
     unsigned wheel_scope;
@@ -130,16 +130,19 @@ static int clamp_step(int offset, int maximum, int delta) {
     return offset + delta;
 }
 
-/* One-row steps until a sustained run of accepted same-direction ticks earns two, then three. */
+/* One-row steps until a sustained run of accepted same-direction ticks ramps the step up one
+ * row per WHEEL_RAMP_MS of spin, capped at WHEEL_MAX_STEP. A pause longer than WHEEL_RUN_MS,
+ * a reversal or a change of menu resets the run, so stopping and reversing stay precise. */
 static int wheel_step(menu_t *m, void *top, int dir, unsigned now) {
     if (m->rows <= SHORT_LIST_MAX) {
         st.wheel_run = 0;
         return 1;
     }
-    if (st.wheel_run && now - st.last_wheel <= ACCEL_MS && st.wheel_dir == dir &&
+    if (st.wheel_run && now - st.last_wheel <= WHEEL_RUN_MS && st.wheel_dir == dir &&
         st.wheel_top == top && st.wheel_surface == m->w && st.wheel_scope == m->scope &&
         st.wheel_ctx == m->ctx)
-        st.wheel_run = (unsigned)clamp_step(st.wheel_run, ACCEL3_HOLD_MS + 1, now - st.last_wheel);
+        st.wheel_run = (unsigned)clamp_step(st.wheel_run, (WHEEL_MAX_STEP - 1) * WHEEL_RAMP_MS + 1,
+                                            now - st.last_wheel);
     else
         st.wheel_run = 1;
     st.last_wheel = now;
@@ -148,7 +151,7 @@ static int wheel_step(menu_t *m, void *top, int dir, unsigned now) {
     st.wheel_surface = m->w;
     st.wheel_scope = m->scope;
     st.wheel_ctx = m->ctx;
-    return st.wheel_run > ACCEL3_HOLD_MS ? 3 : st.wheel_run > ACCEL2_HOLD_MS ? 2 : 1;
+    return 1 + (int)(st.wheel_run - 1) / WHEEL_RAMP_MS;
 }
 
 /* A tap target has an EVT_CLICK handler. V1.32 widget emitter @0x60; emitter_on_with_tag items are

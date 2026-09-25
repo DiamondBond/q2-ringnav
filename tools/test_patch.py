@@ -1084,8 +1084,14 @@ for table in (False,True):
             m.rebind=lambda a,offset: m.bind(rs,offset)
         else: w,es=m.page_list(count,extent=count*48)
         m.paint(w)
-        for want in (1,2,3):
-            assert m.call(gap=50)==11 and m.selected(w)==min(want,count-1)
+        if count==17:
+            # Seventeen rows accelerate even at a 50ms cadence: the second tick is still one
+            # row (50ms of spin), the third crosses 100ms and steps two.
+            for want in (1,2,4):
+                assert m.call(gap=50)==11 and m.selected(w)==want
+        else:
+            for want in (1,2,3):
+                assert m.call(gap=50)==11 and m.selected(w)==min(want,count-1)
         if count==16:
             for want in range(4,16):
                 assert m.call(gap=50)==11 and m.selected(w)==want
@@ -1095,56 +1101,54 @@ for table in (False,True):
 
 # Resizing across the short-list boundary cannot carry a previous fast run with it.
 m=Machine(); w,es=m.page_list(17,height=960,extent=17*48)
-for count in (17,16,17):
-    m.nodes[w]['children']=es[:count]; m.paint(w)
-    for want in (1,2,3):
-        assert m.call(gap=50)==11 and m.selected(w)==want
+m.nodes[w]['children']=es; m.paint(w)
+for want in (1,3,6):
+    assert m.call(gap=100)==11 and m.selected(w)==want
+m.nodes[w]['children']=es[:16]; m.paint(w)
+assert m.call(gap=100)==11 and m.selected(w)==1   # fresh one-row run on the short list
+for want in (2,3):
+    assert m.call(gap=100)==11 and m.selected(w)==want
+m.nodes[w]['children']=es; m.paint(w)
+assert m.call(gap=100)==11 and m.selected(w)==1   # and again after growing back
+assert m.call(gap=100)==11 and m.selected(w)==3
 passed()
 
-# Sustained ticks change one row to two at 300ms and two to three at 600ms; pauses, spacing
-# past the window and reversal reset. Byte-exact boundaries, including a wrapped clock.
+# Sustained ticks ramp one row per 100ms of same-direction spin up to eight rows, then hold;
+# pauses, spacing past the 140ms window and reversal reset. Byte-exact boundaries, wrapped clock.
 for table in (False,True):
     for start in (0,0xfffffff0):
         m=Machine(); m.now=start
         if table:
-            w,rs,es=m.table_page(); m.word(w+O['TABLE_ROWS'],100)
+            w,rs,es=m.table_page(); m.word(w+O['TABLE_ROWS'],500)
             m.rebind=lambda a,offset: m.bind(rs,offset)
-        else: w,es=m.page_list(100,extent=4800)
-        assert m.call(gap=0)==11 and m.selected(w)==1
-        # 1+140+140 = 281ms; +19 reaches exactly 300, still one row.
-        for want in (2,3):
-            assert m.call(gap=140)==11 and m.selected(w)==want
-        assert m.call(gap=19)==11 and m.selected(w)==4
-        # The next millisecond enters two-row speed.
-        assert m.call(gap=1)==11 and m.selected(w)==6
-        # 301+140+140 = 581ms; +19 reaches exactly 600, still two rows.
-        assert m.call(gap=140)==11 and m.selected(w)==8
-        assert m.call(gap=140)==11 and m.selected(w)==10
-        assert m.call(gap=19)==11 and m.selected(w)==12
-        # The next millisecond enters three-row speed.
-        assert m.call(gap=1)==11 and m.selected(w)==15
-        before=m.selected(w)
-        assert m.call(gap=140)==11 and m.selected(w)==before+3
-        before=m.selected(w)
-        assert m.call(gap=141)==11 and m.selected(w)==before+1
-        assert m.call(O['KEY_PREV'],gap=1)==11 and m.selected(w)==before
+        else: w,es=m.page_list(500,extent=24000)
+        # 99ms of spin is still one row; the next millisecond enters two-row speed, and each
+        # further 100ms adds one row until the eight-row ceiling holds.
+        seq=((0,1),(99,2),(1,4),(99,6),(1,9),(99,12),(1,16),(99,20),(1,25),(99,30),(1,36),
+             (99,42),(1,49),(99,56),(1,64),(99,72),(1,80))
+        for gap,want in seq:
+            assert m.call(gap=gap)==11 and m.selected(w)==want
+        # 140ms still counts as spinning, 141ms breaks the run and drops back to one row.
+        assert m.call(gap=140)==11 and m.selected(w)==88
+        assert m.call(gap=141)==11 and m.selected(w)==89
+        assert m.call(O['KEY_PREV'],gap=1)==11 and m.selected(w)==88
         passed()
 # A tick spaced past the 140ms window never accumulates.
 m=Machine(); w,es=m.page_list(100,extent=4800)
 for want in range(1,9):
     assert m.call(gap=141)==11 and m.selected(w)==want
 passed()
-# Pixel-scroll fallback uses the same speeds and immediate offsets.
+# Pixel-scroll fallback uses the same ramp and immediate offsets.
 m=Machine(); w=m.page(t='table_client')
-for i,want in enumerate((1,2,3,5,7,9,12)):
-    assert m.call(gap=100)==11 and m.get(w+O['TABLE_TOP'])==want*48
-assert m.call(gap=141)==11 and m.get(w+O['TABLE_TOP'])==624; passed()
+for want in (48,144,288,480,720,1008,1344,1728):
+    assert m.call(gap=100)==11 and m.get(w+O['TABLE_TOP'])==want
+assert m.call(gap=141)==11 and m.get(w+O['TABLE_TOP'])==1776; passed()
 # A fast spin belongs to its live menu, pane and browsing scope.
 for change in ('window','pane','scope','context','count','gesture','screen','unsupported','touch','click','missing','centre'):
     m=Machine(); w,es=m.page_list(40,extent=40*48,
         name='sysset_page' if change=='context' else 'allmusic_page')
     for _ in range(7): m.call(gap=100)
-    assert m.selected(w)==12
+    assert m.selected(w)==28
     if change=='window':
         w,es=m.page_list(40,extent=40*48,name='allmusic_page')
     elif change=='pane':
@@ -1176,10 +1180,10 @@ for change in ('window','pane','scope','context','count','gesture','screen','uns
 # Rejected stock wheel input resets a sustained list run.
 m=Machine(); w,es=m.page_list(40,extent=40*48)
 for _ in range(7): m.call(gap=100)
-assert m.selected(w)==12
+assert m.selected(w)==28
 m.byte(0xa37c89,1)
-assert m.call(gap=10,debounce=True)==11 and m.selected(w)==12
-assert m.call(gap=40)==11 and m.selected(w)==13; passed()
+assert m.call(gap=10,debounce=True)==11 and m.selected(w)==28
+assert m.call(gap=40)==11 and m.selected(w)==29; passed()
 # A click on a clickable child selects its collected ancestor, not a stale row.
 m=Machine(); w=m.page(); m.word(w+O['W_H'],96)
 row1=m.entry(w,0); row2=m.entry(w,96); deep=m.entry(row1,0)
@@ -1564,7 +1568,8 @@ for virtual in (False,True):
             m.rebind=lambda a,offset: m.bind(rs,offset)
         else: w,es=m.page_list(count,extent=count*48)
         for _ in range(7): m.call(gap=100)
-        assert m.selected(w)==(7 if count==16 else 12)
+        # Sixteen rows stay at one row per tick; seventeen ramp straight into the end row.
+        assert m.selected(w)==(7 if count==16 else 16)
         for _ in range(20): m.call(gap=100)
         assert m.selected(w)==count-1
         assert m.call(O['KEY_PREV'],gap=100)==11 and m.selected(w)==count-2
