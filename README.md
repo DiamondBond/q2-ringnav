@@ -4,7 +4,7 @@ Firmware mod for the Shanling Q2 that lets you use the scroll wheel to move thro
 
 The touchscreen still works normally. Outside supported menus, the wheel still controls volume.
 
-**V3.2 build variants: V3.2R (normal), V3.2C (compact)**
+**Build variants: V3.2R (normal), V3.2C (compact)**
 
 [**Download the latest release**](https://github.com/DiamondBond/q2-ringnav/releases/latest)
 
