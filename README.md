@@ -28,11 +28,11 @@ If the UI is not working, use [Shanling's recovery package](https://drive.google
 
 ## Variants
 
-### Normal — `Q2.Firmware.V3.3.zip`
+### Normal: `Q2.Firmware.V3.3.zip`
 
 Keeps the stock UI and existing controls, including long Return → Home.
 
-### Compact — `Q2.Firmware.V3.3-compact.zip`
+### Compact: `Q2.Firmware.V3.3-compact.zip`
 
 Uses a denser layout for Folder and Local Songs browsing:
 
@@ -79,8 +79,8 @@ Full release history: [docs/changelog.md](docs/changelog.md)
 
 ## Documentation
 
-- [Firmware internals](docs/internals.md) — stock hooks, selection, position memory, wheel/centre timing and drawing.
-- [Build and validation](docs/building.md) — building both variants, the MIPS test suite and on-device acceptance checks.
-- [Release procedure](docs/releasing.md) — packaging, verifying and publishing both ZIPs.
-- [Compact mode](docs/compact.md) — compact layout audit and device checklist.
-- [Custom boot logo](docs/boot-logo.md) — replacing the power-on splash.
+- [Firmware internals](docs/internals.md): stock hooks, selection, position memory, wheel/centre timing and drawing.
+- [Build and validation](docs/building.md): building both variants, the MIPS test suite and on-device acceptance checks.
+- [Release procedure](docs/releasing.md): packaging, verifying and publishing both ZIPs.
+- [Compact mode](docs/compact.md): compact layout audit and device checklist.
+- [Custom boot logo](docs/boot-logo.md): replacing the power-on splash.
