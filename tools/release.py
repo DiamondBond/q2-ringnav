@@ -13,11 +13,6 @@ import tempfile
 import zipfile
 from build import ROOT, VERSIONS, ZIP_SHA, DEMO_SHA, build, check, run, sha, source_sha256
 
-def require_emulator():
-    """Validation runs the MIPS suite, so fail before four builds, not after them."""
-    check(importlib.util.find_spec('unicorn') is not None,
-          'Release validation needs the requirements.txt environment: pip install -r requirements.txt')
-
 TAG = '3.2R'
 ASSETS = {'normal': 'Q2.Firmware.V3.2.zip', 'compact': 'Q2.Firmware.V3.2-compact.zip'}
 NOTES = '''- Same navigation and compact behavior as V3.1R/V3.1C, version display updated to V3.2R/V3.2C.
@@ -141,7 +136,9 @@ if __name__ == '__main__':
     p.add_argument('--publish', action='store_true')
     a = ap.parse_args()
     try:
-        require_emulator()
+        # Validation runs the MIPS suite, so fail before four builds, not after them.
+        check(importlib.util.find_spec('unicorn') is not None,
+              'Release validation needs the requirements.txt environment: pip install -r requirements.txt')
         if a.command == 'package':
             package(a.zip, a.out.resolve(), a.logo)
         else:
