@@ -579,12 +579,15 @@ for page in ('home_page', 'folder_page', 'playing_page', 'sysset_page'):
     if variant == 'compact':
         assert m.text(dest[0][1]) == 'playing_page'
         assert [m.get(dest[0][2] + 4*i) for i in range(4)] == [0, 0, 255, 2]
-    assert m.call(170, gap=0) == 11  # handled hold swallows exactly the following release
+    # The handled hold swallows exactly its own release. On Now Playing itself that release is
+    # kept, so one held Return still goes back instead of needing a second press.
+    held = 0 if variant == 'compact' and page == 'playing_page' else 11
+    assert m.call(170, gap=0) == held
     assert m.call(170, gap=0) == 0   # next short Return still reaches stock Back
     for _ in range(3):
         assert long_return(m) == 0
         assert len(destinations(m)) == 1
-    assert m.call(170, gap=0) == 11
+    assert m.call(170, gap=0) == held
 passed()
 
 # The stock long-key gates stay effective. Compact adds the shared navigation restrictions.
@@ -615,9 +618,10 @@ if variant == 'compact':
     assert not m.timers
     m.advance(201)
     assert not m.dispatched()
-    # A switch that returns failure must still consume the release without a second action.
-    m = long_machine(); m.page('playing_page'); m.animating = 1
+    # A hold blocked elsewhere still swallows its release, so no delayed page action runs.
+    m = long_machine(); m.page('folder_page'); m.byte(syms['g_usblink_status'], 2)
     long_return(m)
+    assert not destinations(m)
     assert m.call(170, gap=0) == 11
 passed()
 # Other long-key paths remain byte-for-byte stock; exercise the inert keys and power gate.

@@ -49,6 +49,7 @@
 #define KEY_NEXT 173
 #define KEY_PLAY 171
 #define BOOT_KEY_GUARD 0xa37c8a /* raw flag address, no symbol in the audited binary */
+#define RETURN_RELEASE_LATCH 0xa37c8b /* stock long Return arms it; the next Return keyup is consumed */
 
 /* slide_menu_scroll_to @0x5f3400 and completion @0x5f3654; animator
  * start @0x665ab0, time_elapse @0x6660d4, scroll_set_params @0x682124. */

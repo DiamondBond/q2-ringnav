@@ -849,6 +849,12 @@ int ringnav_dispatch(void *target, void *event) {
 int compact_now_playing(void) {
     cancel_center();
     drop_spin();
+    void *top = window_manager_get_top_window(window_manager());
+    /* Already on Now Playing: the switch below is a self-switch, but stock has armed its
+     * hold-release latch before this call. Clear it so the release still reaches the page's own
+     * short Return, instead of being swallowed and forcing a second press. */
+    if (top && !tk_strcmp(widget_get_prop_str(top, "name", ""), "playing_page"))
+        *(volatile unsigned char *)RETURN_RELEASE_LATCH = 0;
     if (usable()) {
         static const int context[4] = { 0, 0, 0xff, 2 };
         navigator_switch_to_with_context("playing_page", context, 0);

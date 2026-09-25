@@ -38,7 +38,9 @@ Home call at 0x4e8924. Stock power, lock, test and key-lock gates and its releas
 latch execute first. Compact cancels centre confirmation and spin state, checks
 the shared screen/navigation restrictions, then calls the stock switch function
 with `playing_page` and `{0, 0, 0xff, 2}`. The `0xff` context skips player_start.
-The stock key-up filter consumes the following release. No short-Return callback
+The stock key-up filter consumes the following release, except when Now Playing
+is already the top window: the latch is cleared there so the same release still
+reaches the stock short Return and one press goes back. No short-Return callback
 or other long-key destination changes.
 
 ## Device checklist
@@ -60,6 +62,7 @@ Run this over both builds when validating a release.
 - **return**: Short Return traverses folders and other pages as stock. Hold Return
   and release, repeat holds, try already playing and an empty playback queue.
   Compact opens/stays on Now Playing without restarting audio; normal opens Home.
+  A held Return on Now Playing itself must still go back with one press.
   Arm centre confirmation then hold Return; no delayed item should open. Repeat
   screen-off, locked, power-off/USB/BT restrictions and modal-blocked navigation.
   Other long keys must remain stock.

@@ -36,7 +36,8 @@ these can show fewer entries. Settings, online services, Now Playing, home and d
 their stock layouts. The folder artwork setting and saved preferences remain intact.
 
 Compact long Return opens Now Playing without restarting playback, including when already
-playing; its release is consumed. Short Return keeps stock Back and nested folder traversal.
+playing; its release is consumed. On Now Playing itself Return still goes back with one press,
+held or tapped. Short Return keeps stock Back and nested folder traversal.
 Other long presses are unchanged. The proposed short Return shortcut on Home remains deferred.
 
 ## Controls
