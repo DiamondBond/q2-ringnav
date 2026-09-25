@@ -10,6 +10,7 @@ stock_\name\()_trampoline:
     nop
 .endm
 resume keyup, 0x4e85d4
+resume keydown, 0x4e8430
 resume touch, 0x4e8bdc
 resume paint, 0x6596ac
 resume dispatch, 0x65e0f8

@@ -61,7 +61,7 @@ class Machine:
         self.allocs={}
         self.rebind=None; self.on_click=None; self.glide=True
         self.timers={}; self.next_timer=1; self.timer_fail=False; self.clicks=[]
-        self.screens=[]
+        self.screens=[]; self.buzzes=[]; self.posted=[]
         self.slides={}; self.slide_fail=False; self.slide_on_fail=False; self.slide_callbacks={}
         self.canvas=0x1000200; self.lcd=0x1000300; self.now=1000
         self.word(self.canvas+O['CANVAS_LCD'],self.lcd)
@@ -246,6 +246,11 @@ class Machine:
                 self.word(a+O['SCROLL_X'],self.get(a+O['SCROLL_X'])+b); self.word(a+O['SCROLL_Y'],self.get(a+O['SCROLL_Y'])+c)
             else: self.word(a+O['VIEW_ANIMATOR'],0x1234)
             ret=0
+        elif name=='buzzeer_switch':
+            if self.u.mem_read(syms['g_keytone_flag'],1)[0]: self.buzzes.append(self.now)
+            ret=0
+        elif name=='main_loop': ret=self.wm
+        elif name=='main_loop_post_key_event': self.posted.append((signed(b),signed(c))); ret=0
         elif name=='lcd_get_vgcanvas': ret=self.fake_vg
         elif name.startswith('vg:'):
             self.vg_calls.append((name[3:],signed(a),signed(b)))
@@ -286,6 +291,14 @@ class Machine:
         assert self.u.reg_read(UC_MIPS_REG_SP)==0x7000f000
         assert [self.u.reg_read(r) for r in SAVED]==[0x12340000+i for i in range(len(SAVED))]
         return signed(self.u.reg_read(UC_MIPS_REG_V0))
+    def press(self,key=O['KEY_NEXT'],gap=0,debounce=False):
+        """Run the key-down hook, which holds or passes a wheel detent."""
+        return self.call(key=key,address=HOOKS['on_wm_keydown_before_fun'][0],
+                         event_type=0x110,gap=gap,debounce=debounce)
+    def deliver(self):
+        """Run posted key events through the key-up hook, as the main loop would."""
+        posted,self.posted=self.posted,[]
+        return [self.call(key=key,event_type=0x114,gap=0) for _,key in posted]
     def advance(self,ms,clear=True):
         """Run due one-shot UI timers deterministically, including the exact deadline."""
         if clear: self.calls=[]
@@ -1101,38 +1114,50 @@ for count in (17,16,17):
         assert m.call(gap=50)==11 and m.selected(w)==want
 passed()
 
-# Sustained ticks change from one to two at exactly 450ms; pauses and reversal reset.
+# Sustained ticks change one row to two at 300ms and two to three at 600ms; pauses, spacing
+# past the window and reversal reset. Byte-exact boundaries, including a wrapped clock.
 for table in (False,True):
     for start in (0,0xfffffff0):
-        for gap,fast in ((140,True),(141,False)):
-            m=Machine(); m.now=start
-            if table:
-                w,rs,es=m.table_page(); m.word(w+O['TABLE_ROWS'],100)
-                m.rebind=lambda a,offset: m.bind(rs,offset)
-            else: w,es=m.page_list(100,extent=4800)
-            assert m.call(gap=0)==11 and m.selected(w)==1
-            for want in range(2,5):
-                assert m.call(gap=gap)==11 and m.selected(w)==want
-            # 3*140 + 29 = 449ms; the next millisecond enters two-row speed.
-            assert m.call(gap=29)==11 and m.selected(w)==5
-            assert m.call(gap=1)==11 and m.selected(w)==(7 if fast else 6)
-            before=m.selected(w)
-            assert m.call(gap=140)==11 and m.selected(w)==before+(2 if fast else 1)
-            before=m.selected(w)
-            assert m.call(gap=141)==11 and m.selected(w)==before+1
-            assert m.call(O['KEY_PREV'],gap=1)==11 and m.selected(w)==before
-            passed()
-# Pixel-scroll fallback uses the same speed and immediate offsets.
+        m=Machine(); m.now=start
+        if table:
+            w,rs,es=m.table_page(); m.word(w+O['TABLE_ROWS'],100)
+            m.rebind=lambda a,offset: m.bind(rs,offset)
+        else: w,es=m.page_list(100,extent=4800)
+        assert m.call(gap=0)==11 and m.selected(w)==1
+        # 1+140+140 = 281ms; +19 reaches exactly 300, still one row.
+        for want in (2,3):
+            assert m.call(gap=140)==11 and m.selected(w)==want
+        assert m.call(gap=19)==11 and m.selected(w)==4
+        # The next millisecond enters two-row speed.
+        assert m.call(gap=1)==11 and m.selected(w)==6
+        # 301+140+140 = 581ms; +19 reaches exactly 600, still two rows.
+        assert m.call(gap=140)==11 and m.selected(w)==8
+        assert m.call(gap=140)==11 and m.selected(w)==10
+        assert m.call(gap=19)==11 and m.selected(w)==12
+        # The next millisecond enters three-row speed.
+        assert m.call(gap=1)==11 and m.selected(w)==15
+        before=m.selected(w)
+        assert m.call(gap=140)==11 and m.selected(w)==before+3
+        before=m.selected(w)
+        assert m.call(gap=141)==11 and m.selected(w)==before+1
+        assert m.call(O['KEY_PREV'],gap=1)==11 and m.selected(w)==before
+        passed()
+# A tick spaced past the 140ms window never accumulates.
+m=Machine(); w,es=m.page_list(100,extent=4800)
+for want in range(1,9):
+    assert m.call(gap=141)==11 and m.selected(w)==want
+passed()
+# Pixel-scroll fallback uses the same speeds and immediate offsets.
 m=Machine(); w=m.page(t='table_client')
-for i,want in enumerate((1,2,3,4,5,7,9)):
+for i,want in enumerate((1,2,3,5,7,9,12)):
     assert m.call(gap=100)==11 and m.get(w+O['TABLE_TOP'])==want*48
-assert m.call(gap=141)==11 and m.get(w+O['TABLE_TOP'])==480; passed()
+assert m.call(gap=141)==11 and m.get(w+O['TABLE_TOP'])==624; passed()
 # A fast spin belongs to its live menu, pane and browsing scope.
 for change in ('window','pane','scope','context','count','gesture','screen','unsupported','touch','click','missing','centre'):
     m=Machine(); w,es=m.page_list(40,extent=40*48,
         name='sysset_page' if change=='context' else 'allmusic_page')
     for _ in range(7): m.call(gap=100)
-    assert m.selected(w)==9
+    assert m.selected(w)==12
     if change=='window':
         w,es=m.page_list(40,extent=40*48,name='allmusic_page')
     elif change=='pane':
@@ -1164,10 +1189,60 @@ for change in ('window','pane','scope','context','count','gesture','screen','uns
 # Rejected stock wheel input resets a sustained list run.
 m=Machine(); w,es=m.page_list(40,extent=40*48)
 for _ in range(7): m.call(gap=100)
-assert m.selected(w)==9
+assert m.selected(w)==12
 m.byte(0xa37c89,1)
-assert m.call(gap=10,debounce=True)==11 and m.selected(w)==9
-assert m.call(gap=40)==11 and m.selected(w)==10; passed()
+assert m.call(gap=10,debounce=True)==11 and m.selected(w)==12
+assert m.call(gap=40)==11 and m.selected(w)==13; passed()
+# A wheel detent is held for 25ms before it clicks or steps; its release still lands at settle.
+for key,want in ((O['KEY_NEXT'],3),(O['KEY_PREV'],1)):
+    m=Machine(); w,es=m.page_list(10); m.byte(syms['g_keytone_flag'],1); m.paint(w)
+    m.call(); m.call(); assert m.selected(w)==2
+    assert m.press(key)==1 and not m.buzzes and not m.posted
+    assert m.call(key,gap=10,debounce=True)==11 and not m.buzzes
+    m.advance(14); assert not m.buzzes
+    m.advance(1); assert len(m.buzzes)==1 and [k for _,k in m.posted]==[key]
+    assert m.deliver()==[11] and m.selected(w)==want
+    passed()
+# The phantom-first press sequence: touch detent, its release, then the button. The button drops
+# the detent, so the press ticks once and the list does not move.
+m=Machine(); w,es=m.page_list(10); m.byte(syms['g_keytone_flag'],1); m.paint(w)
+assert m.press(O['KEY_NEXT'])==1
+assert m.call(O['KEY_NEXT'],gap=20,debounce=True)==11 and not m.buzzes and not m.posted
+assert m.press(170,gap=4)==0 and len(m.buzzes)==1
+assert m.selected(w)==0 and m.deliver()==[]
+assert m.call(O['KEY_NEXT'])==11 and m.selected(w)==0
+passed()
+# A button that follows an accepted detent does not add a second tick; its release ends the
+# stock lockout byte early.
+m=Machine(); w,es=m.page_list(10); m.byte(syms['g_keytone_flag'],1); m.paint(w)
+assert m.press(O['KEY_NEXT'])==1
+assert m.call(O['KEY_NEXT'],gap=10,debounce=True)==11
+m.advance(15); assert len(m.buzzes)==1
+assert m.deliver()==[11] and m.selected(w)==1
+assert m.press(170,gap=30)==0 and len(m.buzzes)==1
+assert m.get(0xa37c89)!=0
+assert m.call(170,gap=1,debounce=True)==0 and m.get(0xa37c89)==0
+passed()
+# While the stock lockout is up the wheel neither clicks nor acts; a button release clears it.
+m=Machine(); w,es=m.page_list(10); m.byte(syms['g_keytone_flag'],1); m.paint(w)
+m.byte(0xa37c89,1)
+assert m.press(O['KEY_NEXT'],debounce=True)==1 and not m.buzzes and not m.posted
+assert m.call(O['KEY_NEXT'],gap=10,debounce=True)==11 and m.selected(w)==0
+assert m.call(170,gap=1,debounce=True)==0 and m.get(0xa37c89)==0
+assert m.press(O['KEY_NEXT'],gap=10)==1 and not m.buzzes
+m.advance(25); assert len(m.buzzes)==1
+passed()
+# A fast spin still ticks and steps every detent.
+m=Machine(); w,es=m.page_list(20); m.byte(syms['g_keytone_flag'],1); m.paint(w)
+assert m.press(O['KEY_NEXT'])==1
+assert m.call(O['KEY_NEXT'],gap=10,debounce=True)==11
+assert m.press(O['KEY_NEXT'],gap=10)==1
+assert len(m.buzzes)==1 and len(m.posted)==1
+assert m.deliver()==[11] and m.selected(w)==1
+assert m.call(O['KEY_NEXT'],gap=10,debounce=True)==11
+m.advance(25); assert len(m.buzzes)==2
+assert m.deliver()==[11] and m.selected(w)==2
+passed()
 # A click on a clickable child selects its collected ancestor, not a stale row.
 m=Machine(); w=m.page(); m.word(w+O['W_H'],96)
 row1=m.entry(w,0); row2=m.entry(w,96); deep=m.entry(row1,0)
@@ -1552,7 +1627,7 @@ for virtual in (False,True):
             m.rebind=lambda a,offset: m.bind(rs,offset)
         else: w,es=m.page_list(count,extent=count*48)
         for _ in range(7): m.call(gap=100)
-        assert m.selected(w)==(7 if count==16 else 9)
+        assert m.selected(w)==(7 if count==16 else 12)
         for _ in range(20): m.call(gap=100)
         assert m.selected(w)==count-1
         assert m.call(O['KEY_PREV'],gap=100)==11 and m.selected(w)==count-2
