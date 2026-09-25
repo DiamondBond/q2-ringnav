@@ -1081,6 +1081,9 @@ for table in (False,True):
             # row (50ms of spin), the third crosses 100ms and steps two.
             for want in (1,2,4):
                 assert m.call(gap=50)==11 and m.selected(w)==want
+            for _ in range(20): m.call(gap=50)
+            assert m.selected(w)==count-1      # held at the end
+            assert m.call(O['KEY_PREV'],gap=50)==11 and m.selected(w)==count-2 # ramp resets there
         else:
             for want in (1,2,3):
                 assert m.call(gap=50)==11 and m.selected(w)==min(want,count-1)
@@ -1089,6 +1092,7 @@ for table in (False,True):
                 assert m.call(gap=50)==11 and m.selected(w)==want
             for want in range(14,-1,-1):
                 assert m.call(O['KEY_PREV'],gap=50)==11 and m.selected(w)==want
+            assert m.call(gap=50)==11 and m.selected(w)==1 # and at the start
         passed()
 
 # Resizing across the short-list boundary cannot carry a previous fast run with it.
@@ -1110,10 +1114,8 @@ passed()
 for table in (False,True):
     for start in (0,0xfffffff0):
         m=Machine(); m.now=start
-        if table:
-            w,rs,es=m.table_page(); m.word(w+O['TABLE_ROWS'],500)
-            m.rebind=lambda a,offset: m.bind(rs,offset)
-        else: w,es=m.page_list(500,extent=24000)
+        w,rs=m.list_surface(table,n=500)
+        if table: m.word(w+O['TABLE_ROWS'],500)
         # 99ms of spin is still one row; the next millisecond enters two-row speed, and each
         # further 100ms adds one row until the eight-row ceiling holds.
         seq=((0,1),(99,2),(1,4),(99,6),(1,9),(99,12),(1,16),(99,20),(1,25),(99,30),(1,36),
@@ -1125,11 +1127,6 @@ for table in (False,True):
         assert m.call(gap=141)==11 and m.selected(w)==89
         assert m.call(O['KEY_PREV'],gap=1)==11 and m.selected(w)==88
         passed()
-# A tick spaced past the 140ms window never accumulates.
-m=Machine(); w,es=m.page_list(100,extent=4800)
-for want in range(1,9):
-    assert m.call(gap=141)==11 and m.selected(w)==want
-passed()
 # Pixel-scroll fallback uses the same ramp and immediate offsets.
 m=Machine(); w=m.page(t='table_client')
 for want in (48,144,288,480,720,1008,1344,1728):
@@ -1545,23 +1542,6 @@ m=Machine(); m.page('playing_page'); m.touch(); w,es=m.page_list(3)
 m.paint(w); assert not m.rounded and not m.strokes
 m.call(O['KEY_PLAY']); m.paint(w); assert not m.rounded and not m.strokes
 m.call(); m.paint(w); assert m.rounded; passed()
-
-# Both list types use total count for the 16/17 threshold, and reset at both ends.
-for virtual in (False,True):
-    for count in (16,17):
-        m=Machine()
-        w,rs=m.list_surface(virtual,n=count)
-        if virtual: m.word(w+O['TABLE_ROWS'],count)
-        for _ in range(7): m.call(gap=100)
-        # Sixteen rows stay at one row per tick; seventeen ramp straight into the end row.
-        assert m.selected(w)==(7 if count==16 else 16)
-        for _ in range(20): m.call(gap=100)
-        assert m.selected(w)==count-1
-        assert m.call(O['KEY_PREV'],gap=100)==11 and m.selected(w)==count-2
-        for _ in range(20): m.call(O['KEY_PREV'],gap=100)
-        assert m.selected(w)==0
-        assert m.call(gap=100)==11 and m.selected(w)==1
-        passed()
 
 # Immediate table rebinding replaces widgets, not just their indices. Centre resolves new rows.
 m=Machine(); w,rs,es=m.table_page(); m.glide=False

@@ -201,6 +201,12 @@ static void cancel_center(void) {
     if (timer) timer_remove(timer);
 }
 
+/* A wheel or centre step supersedes any run: drop the spin ramp and home slide. */
+static void drop_spin(void) {
+    st.wheel_run = 0;
+    st.home_surface = (void *)0;
+}
+
 static int is_home(void *top, void *w) {
     return top && w && kind(w) == 3 &&
            !tk_strcmp(widget_get_prop_str(top, "name", ""), "home_page");
@@ -790,8 +796,7 @@ int ringnav_touch(void *ctx, void *event) {
     int result = stock_touch(ctx, event);
     /* A tap is a fresh interaction: it cancels a pending screen-toggle pair and any spin. */
     cancel_center();
-    st.home_surface = (void *)0;
-    st.wheel_run = 0;
+    drop_spin();
     void *w = surface((void *)0, (void *)0);
     /* Pointer-down must not recall/rebind the row that native touch is about to hit. */
     if (!result && w && load_rows(&g_menu, w)) {
@@ -819,8 +824,7 @@ int ringnav_dispatch(void *target, void *event) {
     if (target && event && I(event, EVENT_TYPE) == EVT_CLICK) {
         hide_outline();
         cancel_center(); /* A native activation supersedes confirmation, even without touch. */
-        st.wheel_run = 0;
-        st.home_surface = (void *)0;
+        drop_spin();
         void *other = (void *)0;
         void *w = surface(target, &other);
         /* A tap owns its live row: recall could scroll/rebind that row before delivery. */
@@ -844,8 +848,7 @@ int ringnav(void *ctx, void *event) {
     /* The stock filter dereferences the event before returning. */
     if (!event) {
         cancel_center();
-        st.wheel_run = 0;
-        st.home_surface = (void *)0;
+        drop_spin();
         return 0;
     }
     int result = stock_keyup(ctx, event);
@@ -853,18 +856,14 @@ int ringnav(void *ctx, void *event) {
         cancel_center();
         if (I(event, EVENT_KEY) == KEY_PREV || I(event, EVENT_KEY) == KEY_NEXT) st.wheel_run = 0;
         /* Keep the home interval independent of rejected list navigation. */
-        if (I(event, EVENT_KEY) == KEY_CENTER || !usable()) {
-            st.wheel_run = 0;
-            st.home_surface = (void *)0;
-        }
+        if (I(event, EVENT_KEY) == KEY_CENTER || !usable()) drop_spin();
         return result;
     }
     unsigned key = (unsigned)I(event, EVENT_KEY);
     if (key != KEY_CENTER && key != KEY_PREV && key != KEY_NEXT) return result;
-    if (key == KEY_CENTER) {
-        st.wheel_run = 0;
-        st.home_surface = (void *)0;
-    } else
+    if (key == KEY_CENTER)
+        drop_spin();
+    else
         cancel_center();
     if (st.center_timer && (unsigned)time_now_ms() - st.last_center >= DOUBLE_CLICK_MS) {
         unsigned timer = st.center_timer;
@@ -874,8 +873,7 @@ int ringnav(void *ctx, void *event) {
     /* An overdue click may change power/lock state; inspect it after its callback. */
     if (!usable()) {
         cancel_center();
-        st.wheel_run = 0;
-        st.home_surface = (void *)0;
+        drop_spin();
         return result;
     }
     /* Match the stock power-key release exclusions, including release after long press. */
@@ -887,15 +885,13 @@ int ringnav(void *ctx, void *event) {
     void *wm = window_manager(), *top = window_manager_get_top_window(wm);
     if (!allowed_top(top)) {
         cancel_center();
-        st.wheel_run = 0;
-        st.home_surface = (void *)0;
+        drop_spin();
         return result;
     }
     if (tk_strcmp(widget_get_prop_str(top, "name", ""), "home_page")) st.home_surface = (void *)0;
     if (window_manager_is_animating(wm) || window_manager_get_pointer_pressed(wm)) {
         cancel_center();
-        st.wheel_run = 0;
-        st.home_surface = (void *)0;
+        drop_spin();
         return STOP;
     }
     int dir = key == KEY_NEXT ? 1 : key == KEY_PREV ? -1 : 0;
@@ -903,8 +899,7 @@ int ringnav(void *ctx, void *event) {
     if (!is_home(top, w) || w != st.home_surface) st.home_surface = (void *)0;
     if (!w || !load(&g_menu, w, 1)) {
         cancel_center();
-        st.wheel_run = 0;
-        st.home_surface = (void *)0;
+        drop_spin();
         return dir ? STOP : result;
     }
     if (st.center_timer && !pending_matches(top, &g_menu)) cancel_center();
