@@ -17,17 +17,17 @@ volume are the local/online search dialog and the Tidal search dialog.
   prefer a pane that has entries when neither pane owns the selection.
 - On release: changelog entry for the new version.
 
-Artist → Albums default
------------------------
-- Open Artist detail on Albums by default; retain the All Songs tab and its
-  selection. Audit g_artist_type/tab initialization and saved preference behavior.
-- Verify empty artists, one/many albums, tab switching and Back on device.
-
 Gentler touch inertia
 ---------------------
 - Measure stock swipe coast on short and long local lists, then tune touch
   inertia without changing wheel acceleration or interrupt-on-wheel behavior.
 - Check overshoot, end stops and touch-to-wheel handoff on device.
+
+Artist → Albums default
+-----------------------
+- Open Artist detail on Albums by default; retain the All Songs tab and its
+  selection. Audit g_artist_type/tab initialization and saved preference behavior.
+- Verify empty artists, one/many albums, tab switching and Back on device.
 
 Article-aware artist sorting
 ----------------------------
@@ -46,8 +46,3 @@ Quick-settings volume access
 - Audit the stock quick-settings surface for a direct volume entry that remains
   reachable during wheel navigation. Reuse the stock volume dialog.
 - Verify touch/physical access, locked screen behavior and return to browsing.
-
-Deferred Home short Return shortcut
-----------------------------------
-- Keep short Return stock on Home. Revisit only as a separate control change;
-  compact V3.1 uses long Return to Now Playing.
