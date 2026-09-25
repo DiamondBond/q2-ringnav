@@ -57,7 +57,6 @@ def validate(directory, variant):
             check(line.split() == [hashlib.md5(data).hexdigest(), name] and sha(data) == m[key], 'Update payload mismatch')
     subprocess.run([sys.executable, str(ROOT/'tools/test_build.py'), '--build', str(directory)], check=True)
     subprocess.run([sys.executable, str(ROOT/'tools/test_patch.py'), str(directory)], check=True)
-    return m
 
 
 def archive_bytes(directory):

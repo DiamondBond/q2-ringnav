@@ -12,310 +12,115 @@
   },
   "immediates": [
     {
-      "address": "0x4a2c5c",
-      "original": "0x2402004e",
       "value": "pitch",
-      "purpose": "row creation, reset or artwork offset divisor"
+      "purpose": "row creation, reset or artwork offset divisor",
+      "sites": [
+        ["0x4a2c5c", "0x2402004e"],
+        ["0x4a2c60", "0x2406004e"],
+        ["0x4a2f24", "0x2404004e"],
+        ["0x4a44c8", "0x2410004e"],
+        ["0x4a4b9c", "0x2402004e"],
+        ["0x4a6fa8", "0x2402004e"],
+        ["0x4a9ad8", "0x2410004e"],
+        ["0x4aa35c", "0x2402004e"],
+        ["0x4ad8e4", "0x2410004e"],
+        ["0x4addd0", "0x2402004e"],
+        ["0x4b0f88", "0x2402004e"],
+        ["0x4b2ec0", "0x2402004e"],
+        ["0x4b2f0c", "0x2402004e"],
+        ["0x5217d4", "0x2405004e"],
+        ["0x521a84", "0x2403004e"],
+        ["0x5228f8", "0x2410004e"],
+        ["0x5230c8", "0x2402004e"]
+      ]
     },
     {
-      "address": "0x4a2c60",
-      "original": "0x2406004e",
       "value": "pitch",
-      "purpose": "row creation, reset or artwork offset divisor"
+      "purpose": "local class artwork offset divisor (stock disagrees with its 78px rows)",
+      "sites": [
+        ["0x4b0608", "0x24100078"]
+      ]
     },
     {
-      "address": "0x4a2f24",
-      "original": "0x2404004e",
-      "value": "pitch",
-      "purpose": "row creation, reset or artwork offset divisor"
-    },
-    {
-      "address": "0x4a44c8",
-      "original": "0x2410004e",
-      "value": "pitch",
-      "purpose": "row creation, reset or artwork offset divisor"
-    },
-    {
-      "address": "0x4a4b9c",
-      "original": "0x2402004e",
-      "value": "pitch",
-      "purpose": "row creation, reset or artwork offset divisor"
-    },
-    {
-      "address": "0x4a6fa8",
-      "original": "0x2402004e",
-      "value": "pitch",
-      "purpose": "row creation, reset or artwork offset divisor"
-    },
-    {
-      "address": "0x4a9ad8",
-      "original": "0x2410004e",
-      "value": "pitch",
-      "purpose": "row creation, reset or artwork offset divisor"
-    },
-    {
-      "address": "0x4aa35c",
-      "original": "0x2402004e",
-      "value": "pitch",
-      "purpose": "row creation, reset or artwork offset divisor"
-    },
-    {
-      "address": "0x4ad8e4",
-      "original": "0x2410004e",
-      "value": "pitch",
-      "purpose": "row creation, reset or artwork offset divisor"
-    },
-    {
-      "address": "0x4addd0",
-      "original": "0x2402004e",
-      "value": "pitch",
-      "purpose": "row creation, reset or artwork offset divisor"
-    },
-    {
-      "address": "0x4b0f88",
-      "original": "0x2402004e",
-      "value": "pitch",
-      "purpose": "row creation, reset or artwork offset divisor"
-    },
-    {
-      "address": "0x4b2ec0",
-      "original": "0x2402004e",
-      "value": "pitch",
-      "purpose": "row creation, reset or artwork offset divisor"
-    },
-    {
-      "address": "0x4b2f0c",
-      "original": "0x2402004e",
-      "value": "pitch",
-      "purpose": "row creation, reset or artwork offset divisor"
-    },
-    {
-      "address": "0x5217d4",
-      "original": "0x2405004e",
-      "value": "pitch",
-      "purpose": "row creation, reset or artwork offset divisor"
-    },
-    {
-      "address": "0x521a84",
-      "original": "0x2403004e",
-      "value": "pitch",
-      "purpose": "row creation, reset or artwork offset divisor"
-    },
-    {
-      "address": "0x5228f8",
-      "original": "0x2410004e",
-      "value": "pitch",
-      "purpose": "row creation, reset or artwork offset divisor"
-    },
-    {
-      "address": "0x5230c8",
-      "original": "0x2402004e",
-      "value": "pitch",
-      "purpose": "row creation, reset or artwork offset divisor"
-    },
-    {
-      "address": "0x4b0608",
-      "original": "0x24100078",
-      "value": "pitch",
-      "purpose": "local class artwork offset divisor (stock disagrees with its 78px rows)"
-    },
-    {
-      "address": "0x4a4bb8",
-      "original": "0x24150046",
       "value": "body",
-      "purpose": "row background, hit target and full-height children"
+      "purpose": "row background, hit target and full-height children",
+      "sites": [
+        ["0x4a4bb8", "0x24150046"],
+        ["0x4a62d0", "0x24020046"],
+        ["0x4aa388", "0x24120046"],
+        ["0x4addec", "0x24120046"],
+        ["0x4adfe4", "0x24020046"],
+        ["0x4b0fc0", "0x24110046"],
+        ["0x4b2880", "0x24130046"],
+        ["0x4b2a44", "0x24170046"],
+        ["0x4b2f2c", "0x24130046"],
+        ["0x5223ec", "0x24060046"],
+        ["0x523100", "0x24110046"],
+        ["0x524820", "0x24140046"]
+      ]
     },
     {
-      "address": "0x4a62d0",
-      "original": "0x24020046",
       "value": "body",
-      "purpose": "row background, hit target and full-height children"
+      "purpose": "text/icon container inside row; stock child layout stretches to parent",
+      "sites": [
+        ["0x4a4d50", "0x24020078"],
+        ["0x4a63fc", "0x24020078"],
+        ["0x4a6530", "0x24020078"],
+        ["0x4aa510", "0x24020078"],
+        ["0x4ae288", "0x24020078"]
+      ]
     },
     {
-      "address": "0x4aa388",
-      "original": "0x24120046",
-      "value": "body",
-      "purpose": "row background, hit target and full-height children"
-    },
-    {
-      "address": "0x4addec",
-      "original": "0x24120046",
-      "value": "body",
-      "purpose": "row background, hit target and full-height children"
-    },
-    {
-      "address": "0x4adfe4",
-      "original": "0x24020046",
-      "value": "body",
-      "purpose": "row background, hit target and full-height children"
-    },
-    {
-      "address": "0x4b0fc0",
-      "original": "0x24110046",
-      "value": "body",
-      "purpose": "row background, hit target and full-height children"
-    },
-    {
-      "address": "0x4b2880",
-      "original": "0x24130046",
-      "value": "body",
-      "purpose": "row background, hit target and full-height children"
-    },
-    {
-      "address": "0x4b2a44",
-      "original": "0x24170046",
-      "value": "body",
-      "purpose": "row background, hit target and full-height children"
-    },
-    {
-      "address": "0x4b2f2c",
-      "original": "0x24130046",
-      "value": "body",
-      "purpose": "row background, hit target and full-height children"
-    },
-    {
-      "address": "0x5223ec",
-      "original": "0x24060046",
-      "value": "body",
-      "purpose": "row background, hit target and full-height children"
-    },
-    {
-      "address": "0x523100",
-      "original": "0x24110046",
-      "value": "body",
-      "purpose": "row background, hit target and full-height children"
-    },
-    {
-      "address": "0x524820",
-      "original": "0x24140046",
-      "value": "body",
-      "purpose": "row background, hit target and full-height children"
-    },
-    {
-      "address": "0x4a4d50",
-      "original": "0x24020078",
-      "value": "body",
-      "purpose": "text/icon container inside row; stock child layout stretches to parent"
-    },
-    {
-      "address": "0x4a63fc",
-      "original": "0x24020078",
-      "value": "body",
-      "purpose": "text/icon container inside row; stock child layout stretches to parent"
-    },
-    {
-      "address": "0x4a6530",
-      "original": "0x24020078",
-      "value": "body",
-      "purpose": "text/icon container inside row; stock child layout stretches to parent"
-    },
-    {
-      "address": "0x4aa510",
-      "original": "0x24020078",
-      "value": "body",
-      "purpose": "text/icon container inside row; stock child layout stretches to parent"
-    },
-    {
-      "address": "0x4ae288",
-      "original": "0x24020078",
-      "value": "body",
-      "purpose": "text/icon container inside row; stock child layout stretches to parent"
-    },
-    {
-      "address": "0x4a4ce4",
-      "original": "0x24060009",
       "value": 2,
-      "purpose": "centre 52px artwork in 57px body"
+      "purpose": "centre 52px artwork in 57px body",
+      "sites": [
+        ["0x4a4ce4", "0x24060009"],
+        ["0x4aa4a4", "0x24060009"],
+        ["0x4ae05c", "0x24060009"],
+        ["0x5231c4", "0x24060009"],
+        ["0x523234", "0x24060009"]
+      ]
     },
     {
-      "address": "0x4aa4a4",
-      "original": "0x24060009",
-      "value": 2,
-      "purpose": "centre 52px artwork in 57px body"
-    },
-    {
-      "address": "0x4ae05c",
-      "original": "0x24060009",
-      "value": 2,
-      "purpose": "centre 52px artwork in 57px body"
-    },
-    {
-      "address": "0x5231c4",
-      "original": "0x24060009",
-      "value": 2,
-      "purpose": "centre 52px artwork in 57px body"
-    },
-    {
-      "address": "0x523234",
-      "original": "0x24060009",
-      "value": 2,
-      "purpose": "centre 52px artwork in 57px body"
-    },
-    {
-      "address": "0x4a4d9c",
-      "original": "0x2406000e",
       "value": 7,
-      "purpose": "24px title position, font unchanged"
+      "purpose": "24px title position, font unchanged",
+      "sites": [
+        ["0x4a4d9c", "0x2406000e"],
+        ["0x4a6580", "0x2406000e"],
+        ["0x4aa55c", "0x2406000e"]
+      ]
     },
     {
-      "address": "0x4a6580",
-      "original": "0x2406000e",
       "value": 7,
-      "purpose": "24px title position, font unchanged"
+      "purpose": "title position, font unchanged",
+      "sites": [
+        ["0x4ae314", "0x2406000b"],
+        ["0x4b2bd4", "0x2406000b"]
+      ]
     },
     {
-      "address": "0x4aa55c",
-      "original": "0x2406000e",
-      "value": 7,
-      "purpose": "24px title position, font unchanged"
-    },
-    {
-      "address": "0x4ae314",
-      "original": "0x2406000b",
-      "value": 7,
-      "purpose": "title position, font unchanged"
-    },
-    {
-      "address": "0x4b2bd4",
-      "original": "0x2406000b",
-      "value": 7,
-      "purpose": "title position, font unchanged"
-    },
-    {
-      "address": "0x4a4e04",
-      "original": "0x24060028",
       "value": 33,
-      "purpose": "16px metadata position, font unchanged"
+      "purpose": "16px metadata position, font unchanged",
+      "sites": [
+        ["0x4a4e04", "0x24060028"],
+        ["0x4a661c", "0x24060028"],
+        ["0x4aa5ac", "0x24060028"],
+        ["0x4ae38c", "0x24060028"]
+      ]
     },
     {
-      "address": "0x4a661c",
-      "original": "0x24060028",
       "value": 33,
-      "purpose": "16px metadata position, font unchanged"
+      "purpose": "playlist count position",
+      "sites": [
+        ["0x4b2c38", "0x24060029"]
+      ]
     },
     {
-      "address": "0x4aa5ac",
-      "original": "0x24060028",
-      "value": 33,
-      "purpose": "16px metadata position, font unchanged"
-    },
-    {
-      "address": "0x4ae38c",
-      "original": "0x24060028",
-      "value": 33,
-      "purpose": "16px metadata position, font unchanged"
-    },
-    {
-      "address": "0x4b2c38",
-      "original": "0x24060029",
-      "value": 33,
-      "purpose": "playlist count position"
-    },
-    {
-      "address": "0x4a8cd8",
-      "original": "0x240200be",
       "value": 210,
-      "purpose": "all songs recreated scrollbar matches retained Play All bar"
+      "purpose": "all songs recreated scrollbar matches retained Play All bar",
+      "sites": [
+        ["0x4a8cd8", "0x240200be"]
+      ]
     }
   ]
 }

@@ -128,10 +128,11 @@ def patch_code(data, fileoff, symbols):
         struct.pack_into('<I', data, off, new)
         changes.append(dict(address=hex(address), original=hex(old), patched=hex(new), purpose=purpose))
 
-    for site in AUDIT['immediates']:
-        old = int(site['original'], 16)
-        value = {'pitch': PITCH, 'body': BODY}.get(site['value'], site['value'])
-        word(int(site['address'], 16), old, (old & 0xffff0000) | value, site['purpose'])
+    for group in AUDIT['immediates']:
+        value = {'pitch': PITCH, 'body': BODY}.get(group['value'], group['value'])
+        for address, instruction in group['sites']:
+            old = int(instruction, 16)
+            word(int(address, 16), old, (old & 0xffff0000) | value, group['purpose'])
     # Only the final long-Return call changes. All stock gates and its release guard precede it.
     word(0x4e8924, 0x04110fdf, 0x0c000000 | (symbols['compact_now_playing'] >> 2),
          'long Return destination after stock input gates')

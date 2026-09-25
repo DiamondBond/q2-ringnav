@@ -29,17 +29,18 @@ print('JPEG header regression checks passed.')
 def validate_assets(directory):
     import json, subprocess
     from build import sha, run, fileoff
-    from compact import AUDIT, PITCH, BODY, decode, encode, patch_asset, patch_code
+    from compact import AUDIT, PITCH, decode, patch_asset, patch_code
     manifest = json.loads((directory/'manifest.json').read_text())
     compact = manifest['variant'] == 'compact'
     stock = (directory/'stock-demo').read_bytes()
     demo = (directory/'demo').read_bytes()
     # All original executable bytes outside the reviewed hooks, version and compact sites
     # must remain stock; the payload and ELF mapping are independently hashed by the runner.
-    for site in AUDIT['immediates']:
-        address = int(site['address'], 16); off = fileoff(stock, address)
-        if not compact:
-            assert demo[off:off+4] == stock[off:off+4]
+    for group in AUDIT['immediates']:
+        for address, _ in group['sites']:
+            off = fileoff(stock, int(address, 16))
+            if not compact:
+                assert demo[off:off+4] == stock[off:off+4]
     assert (b'V3.1C\0' if compact else b'V3.1R\0') in demo
     changed = manifest['changed_assets']
     assert set(changed) == ({'release/assets/default/raw/ui/'+p for p in AUDIT['assets']} if compact else set())
@@ -76,8 +77,8 @@ def validate_assets(directory):
         else: raise AssertionError('Accepted a changed asset')
     if compact:
         damaged = bytearray(stock)
-        site = AUDIT['immediates'][0]
-        damaged[fileoff(stock, int(site['address'], 16))] ^= 1
+        address = AUDIT['immediates'][0]['sites'][0][0]
+        damaged[fileoff(stock, int(address, 16))] ^= 1
         try: patch_code(damaged, fileoff, {'compact_now_playing': 0xb00000})
         except ValueError: pass
         else: raise AssertionError('Accepted a changed instruction')
