@@ -609,7 +609,12 @@ static int confirm_center(const void *info) {
     void *top = window_manager_get_top_window(window_manager());
     int valid = w && !window_manager_get_pointer_pressed(window_manager()) && !g_power_longkey &&
                 !g_ingore_bootkey_flag && !*(volatile unsigned char *)BOOT_KEY_GUARD &&
-                load(&g_menu, w, 1) && pending_matches(top, &g_menu);
+                load_rows(&g_menu, w);
+    if (valid) {
+        /* Validation must not recall/rebind a changed scope or consume its pending recall. */
+        g_menu.ctx = context_now(&g_menu.scope);
+        valid = pending_matches(top, &g_menu);
+    }
     cancel_center(); /* Clear before any app callback can destroy or navigate the page. */
     if (valid) {
         void *target = g_menu.at[index_of(&g_menu, st.center_id)];
@@ -725,6 +730,7 @@ static int selects(menu_t *m, void *target) {
  * Do not turn pointer-down into selection: a swipe is not a tap. */
 int ringnav_dispatch(void *target, void *event) {
     if (target && event && I(event, EVENT_TYPE) == EVT_CLICK) {
+        cancel_center(); /* A native activation supersedes confirmation, even without touch. */
         void *other = (void *)0;
         void *w = surface(target, &other);
         /* A tap owns its live row: recall could scroll/rebind that row before delivery. */
@@ -810,7 +816,10 @@ int ringnav(void *ctx, void *event) {
     }
     if (st.center_timer && !pending_matches(top, &g_menu)) cancel_center();
     int touch = widget_get_prop_int(w, TOUCH, 0);
-    if (touch) stop_scroll(&g_menu);
+    if (touch) {
+        stop_scroll(&g_menu);
+        prop(w, TOUCH, 0); /* Centre consumes the interrupted gesture too. */
+    }
     int cur = reconcile(&g_menu, touch || !moving(&g_menu));
     unsigned now = (unsigned)time_now_ms();
     if (!dir) {
@@ -842,7 +851,6 @@ int ringnav(void *ctx, void *event) {
             cancel_center(); /* Allocation failure consumes the press without a click. */
         return STOP;
     }
-    prop(w, TOUCH, 0);
     if (is_home(top, w)) {
         if (st.home_surface == w && st.home_dir == dir && now - st.last_home < HOME_WHEEL_MS)
             return STOP;

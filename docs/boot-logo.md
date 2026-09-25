@@ -22,7 +22,7 @@ Flash `/tmp/q2-logo/update.tar` the normal way: copy it to the root of the micro
 
 - **Orientation: rotate upright artwork 90° clockwise before fitting it.** The stock JPEG is stored sideways because of the framebuffer orientation. The supplied SHANLING logo therefore reads downward along the left side of the stored JPEG and appears upright on the device.
 - **Canvas: exactly 320x375 pixels, black.** `display_logo` does not scale the image. Fit the rotated artwork within both dimensions, preserve its aspect ratio, and centre it horizontally and vertically without cropping. The build rejects any other size.
-- **Format: baseline JPEG.** No PNG, no alpha.
+- **Format: 8-bit, three-component baseline JPEG (RGB/YCbCr).** No PNG, alpha, grayscale or CMYK. The stock renderer assumes three decoded bytes per pixel; the builder rejects incompatible frame headers.
 - **Keep it small.** JPEG data barely compresses and the repacked rootfs must stay within the stock image size (50,442,240 bytes). The stock splash is 47.8 KB and a rebuilt rootfs leaves only about 4 KB of slack, so keep the file around 50 KB or less; re-save at lower quality if the build fails with `Repacked rootfs exceeds stock size`. `assets/logo.jpg` is about 16.5 KB.
 
 The supplied logo comes from the [original artwork](https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRA0yLsPKygK-EqPHDCqGfsbNtwv2mp9Lk4l-aqDei6Qy85qhC-mONCnwo&s=10), transformed directly with ImageMagick. The downloaded source is a 428x346 PNG despite the URL having no filename. To reproduce the transform from that source:

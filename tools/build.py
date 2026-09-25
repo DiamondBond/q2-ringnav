@@ -7,7 +7,7 @@ import argparse, hashlib, io, json, pathlib, re, struct, subprocess, tarfile, zi
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ZIP_SHA = '154c17822d09be001be35c03d2d3488424dee195221790bd70864480d55b0f00'
 DEMO_SHA = '2c5f06142850b4fc168f82b44a81550cce0a5b4b9fe1c179dced4a08a3049138'
-VERSION = 'V2.4R'
+VERSION = 'V2.5R'
 BASE = 0xb00000
 SCRATCH = 0xb0f000
 RING_STEP = 48
@@ -35,7 +35,7 @@ def source_sha256():
 def check(condition, message):
     if not condition: raise ValueError(message)
 def jpeg_size(b):
-    """Width and height from the JPEG SOF marker."""
+    """Validate the splash's supported JPEG frame header and return its dimensions."""
     check(b[:2] == b'\xff\xd8', 'Logo must be a JPEG')
     i = 2
     while i < len(b):
@@ -52,8 +52,12 @@ def jpeg_size(b):
         check(size >= 2 and i + size <= len(b), 'Invalid JPEG segment length')
         if marker in (0xC0,0xC1,0xC2,0xC3,0xC5,0xC6,0xC7,0xC9,0xCA,0xCB,0xCD,0xCE,0xCF):
             check(size >= 8 and size == 8 + 3 * b[i+7], 'Invalid JPEG frame length')
+            # Stock display_logo indexes decoded pixels as RGB triples (0x400ec0 onward),
+            # but leaves libjpeg's output color space unchanged. Grayscale/CMYK are unsafe.
+            check(marker == 0xC0 and b[i+2] == 8 and b[i+7] == 3,
+                  'Logo must be an 8-bit, three-component baseline JPEG (not grayscale/CMYK)')
             h, w = struct.unpack_from('>HH', b, i+3)
-            check(w > 0 and h > 0 and b[i+7] > 0, 'Invalid JPEG dimensions/components')
+            check(w > 0 and h > 0, 'Invalid JPEG dimensions')
             return w, h
         i += size
     raise ValueError('No JPEG size marker')
@@ -236,8 +240,11 @@ def build(zip_path, out, logo):
     import shlex
     replacement = b'release/bin/demo F '+b' '.join(old.groups())+b' cat '+shlex.quote(str(out/'demo')).encode()
     p = p[:old.start()]+replacement+p[old.end():]
-    data = logo.read_bytes()
-    check(jpeg_size(data) == (320, 375), 'Logo must be 320x375 like the stock splash')
+    logo_data = logo.read_bytes()
+    check(jpeg_size(logo_data) == (320, 375), 'Logo must be 320x375 like the stock splash')
+    # Package exactly the validated bytes, even if the input is edited during compression.
+    logo = out/'logo.jpg'
+    logo.write_bytes(logo_data)
     line = re.search(rb'^release/assets/default/raw/images/xx/logo\.jpg R (\d+) (\d+) (\d+) (\d+) .+$', p, re.M)
     check(line is not None, 'Missing stock logo inode')
     replacement = b'release/assets/default/raw/images/xx/logo.jpg F '+b' '.join(line.groups())+b' cat '+shlex.quote(str(logo)).encode()
@@ -269,10 +276,9 @@ def build(zip_path, out, logo):
         rootfs_sha256=sha(newsq.read_bytes()), kernel_sha256=sha(blobs['recovery-update/xImage']),
         hook_address=hex(HOOK), hook_file_offset=hex(hookoff), patch_address=hex(BASE),
         patch_file_offset=hex(appendoff), patch_bytes=len(payload), ring_step_pixels=RING_STEP,
-        version=VERSION, hooks=hooks,
+        version=VERSION, hooks=hooks, logo_sha256=sha(logo_data),
         patch_symbols={n:hex(v) for n,v in ps.items() if n.startswith('stock_')},
         tools={t:run(t,'--version').splitlines()[0] for t in ['clang','ld.lld','llvm-objcopy']})
-    manifest['logo_sha256'] = sha(logo.read_bytes())
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     print(json.dumps({k:manifest[k] for k in ['update_sha256','patch_bytes','version']},indent=2))
 

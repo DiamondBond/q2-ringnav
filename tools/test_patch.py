@@ -1297,4 +1297,42 @@ m=Machine(); w,es=m.page_list(3); m.release()
 assert m.call(args=(0,0,0,0),gap=0)==0
 m.advance(300); assert not m.clicks and not m.timers; passed()
 
+# Any native click supersedes delayed confirmation, even without a pointer-down callback.
+for target_kind in ('same', 'nested', 'outside'):
+    m=Machine(); w,es=m.page_list(3); m.release()
+    target=es[0] if target_kind=='same' else m.entry(es[0]) if target_kind=='nested' else m.node('button')
+    m.call(address=HOOKS['widget_dispatch'][0],args=(target,m.event,0,0),
+           event_type=O['EVT_CLICK'],gap=100)
+    m.advance(300)
+    assert m.clicks==[target] and not m.timers,target_kind
+    passed()
+
+# Centre consumes a touch interruption once; its second release must not stop the recall
+# glide again and replace the armed row with a different visible row.
+m=Machine(); w,es=m.page_list(10); m.paint(w)
+for _ in range(5): m.call()
+w,es=m.page_list(10); m.touch(); m.glide=False
+assert m.release()==11 and m.selected(w)==5
+assert m.release(100)==0 and m.screens==[0]
+m.advance(300)
+assert not m.clicks and not m.timers
+passed()
+
+# Rejecting an expired confirmation must not restore or consume the new scope's recall.
+for virtual in (False,True):
+    m=Machine()
+    if virtual: w,rs,es=m.table_page(n=20)
+    else: w,es=m.page_list(20,name='allmusic_page')
+    off=O['TABLE_TOP'] if virtual else O['SCROLL_Y']
+    m.paint(w)
+    for _ in range(12): m.call()
+    m.word(syms['g_class_type'],2); m.word(w+off,0); m.paint(w); m.release()
+    before=dict(m.nodes[w])
+    m.word(syms['g_class_type'],0xf001); m.advance(300)
+    assert not m.clicks and not m.moved() and m.get(w+off)==0
+    assert m.nodes[w]==before, 'rejected confirmation changed live selection properties'
+    m.paint(w)
+    assert m.selected(w)==12 and m.get(w+off)==540
+    passed()
+
 print(f'{checks} MIPS execution scenarios passed; toolkit services mocked, stock lock filter executed.')
