@@ -56,8 +56,7 @@ typedef struct {
     /* Bump repaint and wrap arm; the widget token rejects recycled surfaces. */
     void *fx_surface;
     int fx_token, bump_dir, edge_dir, edge_id;
-    unsigned fx_timer, bump_until, edge_time;
-    void *edge_surface; /* ring list whose end the bump signalled */
+    unsigned fx_timer, edge_time;
 } scratch_t;
 static scratch_t st __attribute__((section(".scratch")));
 
@@ -345,7 +344,7 @@ static void prop(void *w, const char *name, int value) {
 static void fx_cancel(void) {
     if (st.fx_timer) timer_remove(st.fx_timer);
     st.fx_timer = 0;
-    st.fx_surface = st.edge_surface = (void *)0;
+    st.fx_surface = (void *)0;
     st.bump_dir = 0;
 }
 
@@ -362,24 +361,23 @@ static int fx_expire(const void *info) {
     return 0;
 }
 
-static void fx_arm(void *w, unsigned now) {
+static void fx_arm(void *w, int dir) {
     if (st.fx_timer) timer_remove(st.fx_timer);
     st.fx_timer = timer_add(fx_expire, (void *)0, BUMP_MS);
     st.fx_token = st.fx_token == 0x7fffffff ? 1 : st.fx_token + 1;
     st.fx_surface = w;
-    st.bump_until = now + BUMP_MS;
+    st.bump_dir = st.fx_timer ? dir : 0;
     prop(w, FX, st.fx_token);
 }
 
 /* A boundary detent arms only while the selection stays on that row; leaving it, reversing or
  * waiting longer than EDGE_ARM_MS makes the next boundary detent bump again instead of wrapping. */
 static int edge_live(const menu_t *m, int id, int dir, unsigned now) {
-    return id >= 0 && fx_live(m->w) && st.edge_surface == m->w && st.edge_id == id &&
-           st.edge_dir == dir && (int)(now - st.edge_time) <= EDGE_ARM_MS;
+    return id >= 0 && fx_live(m->w) && st.edge_id == id && st.edge_dir == dir &&
+           (int)(now - st.edge_time) <= EDGE_ARM_MS;
 }
 
-static void edge_arm(const menu_t *m, int id, int dir, unsigned now) {
-    st.edge_surface = m->w;
+static void edge_arm(int id, int dir, unsigned now) {
     st.edge_id = id;
     st.edge_dir = dir;
     st.edge_time = now;
@@ -778,19 +776,6 @@ static int confirm_center(const void *info) {
     return 0;
 }
 
-/* Clip the outline to its navigation surface; the caller restores `old`. */
-static int clip_menu(menu_t *m, void *canvas, rect_t *old, rect_t *clip) {
-    canvas_get_clip_rect(canvas, old);
-    int x = I(canvas, CANVAS_X), y = I(canvas, CANVAS_Y);
-    clip->x = old->x > x ? old->x : x;
-    clip->y = old->y > y ? old->y : y;
-    int right = old->x + old->w < x + I(m->w, W_W) ? old->x + old->w : x + I(m->w, W_W);
-    int bottom = old->y + old->h < y + m->height ? old->y + old->h : y + m->height;
-    clip->w = right - clip->x;
-    clip->h = bottom - clip->y;
-    return clip->w > 0 && clip->h > 0;
-}
-
 /* Native scroll_to with the bar's current value only wakes its opacity lifecycle.
  * Stock setters retain ownership of thumb position. A transparent bar is still a bar.
  * The native same-value path shows immediately, waits 300 ms and fades over 500 ms. */
@@ -837,47 +822,53 @@ int ringnav_paint(void *w, void *canvas) {
     int i = reconcile(&g_menu,
                       !moving(&g_menu) && !window_manager_get_pointer_pressed(window_manager()));
     if (i < 0 || st.touch_mode) return result;
-    int fx = fx_live(w);
-    unsigned now = (unsigned)time_now_ms();
     rect_t r = bounds(&g_menu, i), old, clip;
     /* A boundary detent nudges the outline against the end until it springs back. */
-    if (fx && st.bump_dir && (int)(st.bump_until - now) > 0) r.y -= st.bump_dir * BUMP_PX;
-    if (r.w >= 5 && r.h >= 5 && P(canvas, CANVAS_LCD) && clip_menu(&g_menu, canvas, &old, &clip)) {
-        void *lcd = P(canvas, CANVAS_LCD);
-        unsigned fill_color = (unsigned)I(lcd, LCD_FILL_COLOR);
-        unsigned stroke_color = (unsigned)I(lcd, LCD_STROKE_COLOR);
-        canvas_set_clip_rect(canvas, &clip);
-        rect_t outer = { r.x + 1, r.y + 1, r.w - 2, r.h - 2 };
-        rect_t inner = { outer.x + 1, outer.y + 1, outer.w - 2, outer.h - 2 };
-        int drawn = 0;
-        /* Two concentric one-pixel rounded strokes, shade outside and white inside, not one
-         * border_width=2 call: the effect then does not depend on how a canvas backend
-         * interprets the width argument. Geometry is checked before the call, and radius 9/8
-         * both stay above the stock "square at <= 2" cutoff. The stock rounded stroke returns
-         * non-zero when its backend cannot draw (for example a canvas without a vgcanvas), and
-         * the safe square fallback then keeps the outline visible. */
-        if (outer.w > 2 * RADIUS && outer.h > 2 * RADIUS) {
-            unsigned fill = FILL_COLOR;
-            canvas_fill_rounded_rect(canvas, &outer, (void *)0, &fill, RADIUS);
-            unsigned shade = SHADE_COLOR;
-            unsigned white = OUTLINE_COLOR;
-            drawn = canvas_stroke_rounded_rect(canvas, &outer, (void *)0, &shade, RADIUS, 1) == 0;
-            if (drawn)
-                drawn = canvas_stroke_rounded_rect(canvas, &inner, (void *)0, &white, RADIUS - 1,
-                                                   1) == 0;
-        }
-        if (!drawn) {
-            canvas_set_stroke_color(canvas, SHADE_COLOR);
-            canvas_stroke_rect(canvas, outer.x, outer.y, outer.w, outer.h);
-            canvas_set_stroke_color(canvas, OUTLINE_COLOR);
-            canvas_stroke_rect(canvas, inner.x, inner.y, inner.w, inner.h);
-        }
-        /* Save/restore explicitly: this firmware's canvas_save/restore cover neither clip nor
-         * either color, and the global alpha is deliberately never touched. */
-        canvas_set_fill_color(canvas, fill_color);
-        canvas_set_stroke_color(canvas, stroke_color);
-        canvas_set_clip_rect(canvas, &old);
+    if (fx_live(w) && st.bump_dir) r.y -= st.bump_dir * BUMP_PX;
+    if (r.w < 5 || r.h < 5 || !P(canvas, CANVAS_LCD)) return result;
+    canvas_get_clip_rect(canvas, &old);
+    int x = I(canvas, CANVAS_X), y = I(canvas, CANVAS_Y);
+    clip.x = old.x > x ? old.x : x;
+    clip.y = old.y > y ? old.y : y;
+    int right = old.x + old.w < x + I(g_menu.w, W_W) ? old.x + old.w : x + I(g_menu.w, W_W);
+    int bottom = old.y + old.h < y + g_menu.height ? old.y + old.h : y + g_menu.height;
+    clip.w = right - clip.x;
+    clip.h = bottom - clip.y;
+    if (clip.w <= 0 || clip.h <= 0) return result;
+    void *lcd = P(canvas, CANVAS_LCD);
+    unsigned fill_color = (unsigned)I(lcd, LCD_FILL_COLOR);
+    unsigned stroke_color = (unsigned)I(lcd, LCD_STROKE_COLOR);
+    canvas_set_clip_rect(canvas, &clip);
+    rect_t outer = { r.x + 1, r.y + 1, r.w - 2, r.h - 2 };
+    rect_t inner = { outer.x + 1, outer.y + 1, outer.w - 2, outer.h - 2 };
+    int drawn = 0;
+    /* Two concentric one-pixel rounded strokes, shade outside and white inside, not one
+     * border_width=2 call: the effect then does not depend on how a canvas backend
+     * interprets the width argument. Geometry is checked before the call, and radius 9/8
+     * both stay above the stock "square at <= 2" cutoff. The stock rounded stroke returns
+     * non-zero when its backend cannot draw (for example a canvas without a vgcanvas), and
+     * the safe square fallback then keeps the outline visible. */
+    if (outer.w > 2 * RADIUS && outer.h > 2 * RADIUS) {
+        unsigned fill = FILL_COLOR;
+        canvas_fill_rounded_rect(canvas, &outer, (void *)0, &fill, RADIUS);
+        unsigned shade = SHADE_COLOR;
+        unsigned white = OUTLINE_COLOR;
+        drawn = canvas_stroke_rounded_rect(canvas, &outer, (void *)0, &shade, RADIUS, 1) == 0;
+        if (drawn)
+            drawn =
+                canvas_stroke_rounded_rect(canvas, &inner, (void *)0, &white, RADIUS - 1, 1) == 0;
     }
+    if (!drawn) {
+        canvas_set_stroke_color(canvas, SHADE_COLOR);
+        canvas_stroke_rect(canvas, outer.x, outer.y, outer.w, outer.h);
+        canvas_set_stroke_color(canvas, OUTLINE_COLOR);
+        canvas_stroke_rect(canvas, inner.x, inner.y, inner.w, inner.h);
+    }
+    /* Save/restore explicitly: this firmware's canvas_save/restore cover neither clip nor
+     * either color, and the global alpha is deliberately never touched. */
+    canvas_set_fill_color(canvas, fill_color);
+    canvas_set_stroke_color(canvas, stroke_color);
+    canvas_set_clip_rect(canvas, &old);
     return result;
 }
 
@@ -1084,9 +1075,8 @@ int ringnav(void *ctx, void *event) {
                 return STOP;
             }
             if (!edge_live(&g_menu, id, dir, now)) {
-                edge_arm(&g_menu, id, dir, now);
-                st.bump_dir = dir;
-                fx_arm(w, now);
+                edge_arm(id, dir, now);
+                fx_arm(w, dir);
                 stop_scroll(&g_menu);
                 widget_invalidate_force(w, (void *)0);
                 return STOP;
@@ -1095,7 +1085,7 @@ int ringnav(void *ctx, void *event) {
             st.bump_dir = 0;
             next = dir > 0 ? 0 : g_menu.rows - 1;
         }
-        st.edge_surface = (void *)0; /* left the end: the next boundary detent bumps again */
+        st.edge_id = -1; /* left the end: the next boundary detent bumps again */
         select(&g_menu, next);
         /* Stop momentum even when the selected row already fits the viewport. */
         reveal(&g_menu, next, 1);
