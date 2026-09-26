@@ -58,3 +58,5 @@
 { "tidal_playmore_page", CTX_DYNAMIC },
 { "tidal_user_loginout_page", CTX_DYNAMIC },
 { "tidal_viewall_page", CTX_DYNAMIC },
+{ "search_dialog", CTX_DYNAMIC },
+{ "tidal_search_dialog", CTX_DYNAMIC },

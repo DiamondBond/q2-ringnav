@@ -134,7 +134,7 @@ class Machine:
         self.word(a+O['W_PARENT'],parent); self.word(a+O['W_Y'],y); self.word(a+O['W_H'],48)
         return a
     def selected(self,w): return self.nodes[w].get('_ringnav_index',-1)
-    def paint(self,w): return self.call(address=HOOKS['widget_on_paint_border'][0],args=(w,self.canvas,0,0))
+    def paint(self,w,gap=1000): return self.call(address=HOOKS['widget_on_paint_border'][0],args=(w,self.canvas,0,0),gap=gap)
     def touch(self): return self.call(address=HOOKS['on_wm_tsdown_before_fun'][0])
     def click(self,w): return self.call(address=HOOKS['widget_dispatch'][0],args=(w,self.event,0,0),event_type=O['EVT_CLICK'])
     def hook(self,u,address,size,_):
@@ -161,6 +161,25 @@ class Machine:
             self.nodes[a]['children'].append(ret)
         elif name=='widget_set_name': n['name']=self.text(b); ret=0
         elif name=='widget_set_children_layout': n['children_layout']=self.text(b); ret=0
+        elif name=='widget_lookup':
+            def lookup(w):
+                if self.nodes[w].get('name')==self.text(b): return w
+                for child in self.nodes[w]['children']:
+                    found=lookup(child) if c else (child if self.nodes[child].get('name')==self.text(b) else 0)
+                    if found: return found
+                return 0
+            ret=lookup(a) if a else 0
+        elif name=='scroll_bar_cast': ret=a
+        elif name=='scroll_bar_is_mobile': ret=n.get('type')=='scroll_bar_m'
+        elif name=='widget_set_opacity': self.byte(a+0x34,b); ret=0
+        elif name in ('widget_set_visible_only','widget_set_sensitive'):
+            n['visible' if name=='widget_set_visible_only' else 'sensitive']=b; ret=0
+        elif name=='widget_animator_prop_create':
+            ret=self.alloc(0x80); self.word(ret+4,a); self.word(ret+O['ANIM_DURATION'],b)
+            self.word(ret+0x24,c); assert self.text(self.get(u.reg_read(UC_MIPS_REG_SP)+16))=='opacity'
+        elif name=='widget_animator_prop_set_params':
+            assert self.get(u.reg_read(UC_MIPS_REG_SP)+16)==0 and self.get(u.reg_read(UC_MIPS_REG_SP)+20)==0
+            ret=0
         elif name=='window_manager': ret=self.wm
         elif name=='window_manager_get_top_window': ret=self.top
         elif name=='window_manager_is_animating': ret=self.animating
@@ -349,9 +368,9 @@ class Machine:
         """Reindex a recycled row pool the way the stock table rebind does."""
         for j,r in enumerate(rows):
             self.word(r+O['ROW_INDEX'],offset//48+j); self.word(r+O['W_Y'],(offset//48+j)*48)
-    def table_page(self,n=4):
+    def table_page(self,n=4,name='allmusic_page'):
         """A table_client page of n recycled rows; returns (surface, row widgets, entries)."""
-        w=self.page('allmusic_page','table_client')
+        w=self.page(name,'table_client')
         self.word(w+O['ROW_HEIGHT'],48); self.word(w+O['TABLE_ROWS'],20); self.word(w+O['W_H'],96)
         rs=[self.node('table_row') for _ in range(n)]
         es=[self.entry(r) for r in rs]; self.nodes[w]['children']=rs
@@ -575,13 +594,12 @@ for page in ('home_page', 'folder_page', 'playing_page', 'sysset_page'):
     assert long_return(m) == 0
     dest = destinations(m)
     assert len(dest) == 1
-    assert dest[0][0] == ('navigator_switch_to_with_context' if variant == 'compact' else 'navigator_back_to_home')
-    if variant == 'compact':
+    assert dest[0][0] == ('navigator_switch_to_with_context' if variant == 'compact' and page != 'playing_page' else 'navigator_back_to_home')
+    if variant == 'compact' and page != 'playing_page':
         assert m.text(dest[0][1]) == 'playing_page'
         assert [m.get(dest[0][2] + 4*i) for i in range(4)] == [0, 0, 255, 2]
-    # The handled hold swallows exactly its own release. On Now Playing itself that release is
-    # kept, so one held Return still goes back instead of needing a second press.
-    held = 0 if variant == 'compact' and page == 'playing_page' else 11
+    # Every handled hold swallows its own release, including the Home shortcut.
+    held = 11
     assert m.call(170, gap=0) == held
     assert m.call(170, gap=0) == 0   # next short Return still reaches stock Back
     for _ in range(3):
@@ -899,13 +917,28 @@ for reuse in (False,True):
             m.word(w+O['TABLE_TOP'],0); m.paint(w)
             assert m.selected(w)==wanted and m.get(w+O['TABLE_TOP'])==(wanted-1)*48+12
         passed()
-# Without an audited content identity, a recreated detail/network page starts fresh.
-for name in ('netdiskfolder_page','tidal_albuminfo_page','playerqueue_page'):
+# Without an audited content identity, a recreated detail, dialog or network page starts fresh.
+for name in ('netdiskfolder_page','tidal_albuminfo_page','playerqueue_page',
+             'search_dialog','tidal_search_dialog'):
     m=Machine(); w,es=m.page_list(8,name=name); m.paint(w)
     for _ in range(3): m.call()
     m.paint(w); assert m.selected(w)==3
     w2,es2=m.page_list(8,name=name); m.paint(w2); assert m.selected(w2)==0
     passed()
+
+# Search result dialogs navigate their list and centre opens the highlighted result.
+for name in ('search_dialog','tidal_search_dialog'):
+    m=Machine(); w,es=m.page_list(8,name=name)
+    m.paint(w)
+    for _ in range(2): assert m.call()==11
+    assert m.selected(w)==2
+    assert m.confirm()==11 and m.dispatched()[0][1]==es[2]
+    passed()
+# The search input dialogs have no navigable pane: they stay off the allowlist so the wheel
+# keeps changing volume instead of being consumed by a window that cannot scroll.
+for name in ('searchbox_dialog','tidal_searchbox_dialog'):
+    m=Machine(); m.top=m.node('window',name,[m.node('view')])
+    assert m.call()==0 and not m.moved(); passed()
 
 # An interrupted recall glide keeps the remembered row instead of adopting a visible one.
 m=Machine(); w,es=m.page_list(10,extent=1000)
@@ -1013,7 +1046,7 @@ for action in ('touch','next','prev'):
     m=Machine(); w,es=m.page_list(3); m.release()
     if action=='touch': m.call(address=HOOKS['on_wm_tsdown_before_fun'][0],gap=100)
     else: m.call(O['KEY_NEXT'] if action=='next' else O['KEY_PREV'],gap=100)
-    m.advance(300); assert not m.clicks and not m.timers
+    m.advance(1000); assert not m.clicks and not m.timers
     assert m.release()==11
     m.advance(300); assert len(m.clicks)==1 and not m.screens; passed()
 # Changed, destroyed, or address-reused targets cannot receive a delayed click.
@@ -1212,7 +1245,9 @@ for table in (False,True):
     for count in (0,1,16,17):
         m=Machine()
         if table:
-            w,rs,es=m.table_page(n=min(count,4)); m.word(w+O['TABLE_ROWS'],count)
+            # A dynamic page keeps hard ends, so this stays an acceleration check.
+            w,rs,es=m.table_page(n=min(count,4),name='playerqueue_page')
+            m.word(w+O['TABLE_ROWS'],count)
             m.rebind=lambda a,offset: m.bind(rs,offset)
         else: w,es=m.page_list(count,extent=count*48)
         m.paint(w)
@@ -1544,7 +1579,7 @@ for pointer_down in (False,True):
 
 # Saturate before adding: large valid tables cannot wrap their viewport or logical selection.
 for pooled in (False,True):
-    m=Machine(); w,rs,es=m.table_page(n=1 if pooled else 0)
+    m=Machine(); w,rs,es=m.table_page(n=1 if pooled else 0,name='playerqueue_page')
     m.word(w+O['ROW_HEIGHT'],1); m.word(w+O['TABLE_ROWS'],0x7fffffff)
     m.word(w+O['W_H'],1); m.word(w+O['TABLE_TOP'],0x7ffffffe)
     if pooled:
@@ -1702,5 +1737,182 @@ assert m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==60
 assert m.get(w+O['TABLE_ANIMATOR'])==0
 m.confirm(); assert m.clicks==[es[1]] and m.clicks[0] not in old
 passed()
+
+# Ring lists bump at both ends and wrap to the other end on the next same-direction detent.
+m=Machine(); w,es=m.page_list(6,height=96,extent=288,name='playlist_page')
+m.paint(w)
+for _ in range(5): assert m.call()==11
+assert m.selected(w)==5 and m.get(w+O['SCROLL_Y'])==192
+assert m.call(gap=100)==11 and m.selected(w)==5 and m.get(w+O['SCROLL_Y'])==192
+m.paint(w,gap=0)
+assert m.rounded[0]['rect']==(1,43,238,46)   # bumped up against the end
+assert m.call(gap=100)==11 and m.selected(w)==0 and m.get(w+O['SCROLL_Y'])==0
+m.paint(w,gap=0); assert m.rounded[0]['rect']==(1,1,238,46)
+assert m.call(O['KEY_PREV'],gap=100)==11 and m.selected(w)==0
+m.paint(w,gap=0); assert m.rounded[0]['rect']==(1,7,238,46)   # bumped down at the top
+assert m.call(O['KEY_PREV'],gap=100)==11 and m.selected(w)==5 and m.get(w+O['SCROLL_Y'])==192
+m.paint(w,gap=0); assert m.rounded[0]['rect']==(1,49,238,46)
+passed()
+
+# A pause longer than the arm window bumps again instead of wrapping.
+m=Machine(); w,es=m.page_list(6,height=96,extent=288,name='folder_page')
+m.u.mem_write(syms['g_folder_path'],b'/sd/albums\0')
+m.paint(w)
+for _ in range(5): assert m.call()==11
+assert m.call(gap=100)==11 and m.selected(w)==5
+assert m.call(gap=O['EDGE_ARM_MS']+10)==11 and m.selected(w)==5
+m.paint(w,gap=0); assert m.rounded[0]['rect']==(1,43,238,46)
+assert m.call(gap=50)==11 and m.selected(w)==0
+passed()
+
+# Virtual music tables carry over too; the wrap lands on the first logical row.
+m=Machine(); w,rs,es=m.table_page(n=4)
+m.word(w+O['W_H'],96); m.word(w+O['TABLE_ROWS'],20)
+m.rebind=lambda a,offset: m.bind(rs,offset)
+m.paint(w)
+for _ in range(19): assert m.call()==11
+assert m.selected(w)==19 and m.get(w+O['TABLE_TOP'])==864
+assert m.call(gap=100)==11 and m.selected(w)==19
+assert m.call(gap=100)==11 and m.selected(w)==0 and m.get(w+O['TABLE_TOP'])==0
+assert any(c[0]=='table_client_set_yoffset' for c in m.calls)
+passed()
+
+# Settings menus, dynamic pages and the album grid keep hard ends; one-row lists never wrap.
+for name in ('sysset_page','playerqueue_page','album_page'):
+    m=Machine(); w,es=m.page_list(6,height=96,extent=288,name=name)
+    m.paint(w)
+    for _ in range(5): assert m.call()==11
+    assert m.call(gap=100)==11 and m.selected(w)==5
+    m.paint(w,gap=0); assert m.rounded[0]['rect']==(1,49,238,46)
+    assert m.call(gap=100)==11 and m.selected(w)==5
+    passed()
+m=Machine(); w,es=m.page_list(1,height=96,extent=96,name='playlist_page')
+m.paint(w)
+for _ in range(3): assert m.call(gap=100)==11 and m.selected(w)==0
+m.paint(w,gap=0); assert m.rounded[0]['rect']==(1,1,238,46)
+passed()
+
+# Native scrollbar lifecycle, including a fully transparent/invisible mobile bar.
+for kind in ('scroll_view','table_client'):
+    m=Machine()
+    w,es=m.page_list(20,extent=960) if kind=='scroll_view' else (lambda t:(t[0],t[2]))(m.table_page(20))
+    bar=m.node('scroll_bar_m',visible=0); m.byte(bar+0x8d,1); m.word(bar+O['BAR_VALUE'],17)
+    parent=m.node('list_view' if kind=='scroll_view' else 'table_view',children=[w,bar])
+    m.word(w+O['W_PARENT'],parent); m.nodes[m.top]['children']=[parent]
+    m.handlers.pop(syms['scroll_bar_scroll_to'])
+    for name in ('scroll_bar_cast','scroll_bar_is_mobile','widget_set_opacity','widget_set_sensitive',
+                 'widget_set_visible_only','widget_animator_prop_create','widget_animator_prop_set_params'):
+        m.handlers[syms[name]]=name
+    m.paint(w); m.call(gap=0)
+    assert m.nodes[bar]['visible'] and m.u.mem_read(bar+0x34,1)==b'\xff'
+    animator=m.get(bar+0x98)
+    assert animator and m.get(animator+O['ANIM_DURATION'])==500 and m.get(animator+0x24)==300
+    assert m.get(bar+O['BAR_VALUE'])==17  # waking must not calculate or move the thumb
+    m.touch(); m.call(gap=0)
+    assert m.get(bar+0x98)!=animator
+    assert any(c[0]=='widget_animator_destroy' and c[1]==animator for c in m.calls)
+    # The stock opacity completion disables and hides the bar; no payload fade timer exists.
+    animator=m.get(bar+0x98); callback,ctx=m.slide_callbacks[animator]
+    m.byte(bar+0x34,0)
+    assert m.call(address=callback,args=(ctx,0,0,0),gap=0)==7
+    assert not m.nodes[bar]['visible'] and not m.nodes[bar]['sensitive'] and not m.get(bar+0x98)
+    m.call(gap=0); assert m.nodes[bar]['visible']
+    m.top=0; m.nodes.clear(); m.advance(1000)  # payload retains no native bar/animator pointer
+    passed()
+for count,bar_present in ((2,True),(20,False)):
+    m=Machine(); w,es=m.page_list(count,height=96,extent=count*48)
+    parent=m.node('list_view',children=[w]+([m.node('scroll_bar_m')] if bar_present else []))
+    m.word(w+O['W_PARENT'],parent); m.paint(w); m.call()
+    assert not any(c[0]=='scroll_bar_scroll_to' for c in m.calls)
+    passed()
+
+# Bump repaints at precisely 120 ms, independently of the 800 ms second-detent arm.
+m=Machine(); w,es=m.page_list(2,height=96,extent=96,name='playlist_page')
+m.paint(w); m.call(); m.call(gap=0)
+assert m.timers and min(t[0] for t in m.timers.values())==m.now+O['BUMP_MS']
+m.advance(O['BUMP_MS']-1); assert not m.calls
+m.advance(1); assert any(c[0]=='widget_invalidate_force' and c[1]==w for c in m.calls)
+m.paint(w,gap=0); assert m.rounded[0]['rect']==(1,49,238,46)
+m.call(gap=100); assert m.selected(w)==0
+passed()
+for cancel in ('touch','activate','recycle','destroy','scope'):
+    m=Machine(); w,es=m.page_list(2,height=96,extent=96,name='folder_page')
+    m.u.mem_write(syms['g_folder_path'],b'/sd/a\0'); m.paint(w); m.call(); m.call(gap=0)
+    if cancel=='touch': m.touch()
+    elif cancel=='activate': m.click(es[-1])
+    elif cancel=='recycle': m.nodes[w].pop('_ringnav_fx')
+    elif cancel=='destroy': m.top=0; m.nodes.clear()
+    else: m.u.mem_write(syms['g_folder_path'],b'/sd/b\0'); m.paint(w,gap=0)
+    m.advance(O['BUMP_MS'])
+    assert not any(c[0]=='widget_invalidate_force' and c[1]==w for c in m.calls)
+    passed()
+
+# Execute stock navigator, Now Playing initialization/key-up, and native window switch/close.
+# Resource loading, array storage, paint and animation services remain mocked.
+class NavigationMachine(Machine):
+    def __init__(self):
+        super().__init__()
+        self.order=[]; self.block_open=False
+        self.word(self.wm+0x94,0x9a0490)
+        for name in ('navigator_switch_to_with_context','navigator_back_to_home','navigator_to_with_context'):
+            self.handlers.pop(syms[name],None)
+        for name in ('widget_child','window_open_and_close','widget_restack','widget_get_window',
+                     'widget_is_keyboard','widget_is_dialog','widget_is_window','widget_is_normal_window',
+                     'widget_remove_child','widget_destroy','window_manager_dispatch_window_event',
+                     'widget_foreach','widget_on','playing_timer_start','access@GLIBC_2.0',
+                     'remove@GLIBC_2.0','idle_add','netdisk_folder_clear','awake_screen'):
+            self.handlers[syms[name]]='nav:'+name
+        self.handlers[syms['strcmp@GLIBC_2.0']]='tk_strcmp'
+        for address in (0x52b6f4,0x68541c,0x6885c0,0x6861d4): self.handlers[address]='nav:'+hex(address)
+    def sync_order(self):
+        self.top=self.order[-1] if self.order else 0
+        arr=self.alloc(12); items=self.alloc(max(4,len(self.order)*4))
+        self.word(self.wm+0x5c,arr); self.word(arr,len(self.order)); self.word(arr+8,items)
+        for i,w in enumerate(self.order): self.word(items+4*i,w); self.word(w+O['W_PARENT'],self.wm)
+    def hook(self,u,address,size,unused):
+        name=self.handlers.get(address,'')
+        if not name.startswith('nav:'): return super().hook(u,address,size,unused)
+        assert u.reg_read(UC_MIPS_REG_T9)==address
+        name=name[4:]; a,b,c,d=[u.reg_read(r) for r in REGS]; ret=0
+        self.calls.append((name,a,b,c))
+        if name=='widget_child':ret=next((w for w in self.order if self.nodes[w]['name']==self.text(b)),0)
+        elif name=='window_open_and_close':
+            if not self.block_open:
+                ret=self.node('window',self.text(a),stage=3); self.order.append(ret); self.sync_order()
+        elif name=='widget_restack':
+            self.order.remove(a); self.order.insert(min(b,len(self.order)),a); self.sync_order()
+        elif name=='widget_get_window': ret=a
+        elif name in ('widget_is_window','widget_is_normal_window'): ret=int(a in self.order)
+        elif name=='widget_remove_child': self.order.remove(b); self.sync_order()
+        elif name=='0x6885c0': ret=1  # stock no-window-animation completion branch
+        elif name=='0x6861d4':ret=self.top
+        elif name=='access@GLIBC_2.0':ret=-1
+        u.reg_write(UC_MIPS_REG_V0,ret&0xffffffff); u.reg_write(UC_MIPS_REG_PC,u.reg_read(UC_MIPS_REG_RA))
+
+if variant=='compact':
+    for existing in (False,True):
+        for empty in (False,True):
+            m=NavigationMachine(); w,es=m.page_list(20,name='folder_page'); browse=m.top
+            home=m.node('window','home_page',stage=3)
+            playing=m.node('window','playing_page',stage=3) if existing else 0
+            m.order=[home]+([playing] if playing else [])+[browse]; m.sync_order()
+            m.u.mem_write(syms['g_folder_path'],b'/sd/music\0'); m.paint(w)
+            for _ in range(6):m.call()
+            selected,offset=m.selected(w),m.get(w+O['SCROLL_Y'])
+            for visit in range(3):
+                long_return(m)
+                assert m.nodes[m.top]['name']=='playing_page'
+                assert not any(c[0]=='player_start' for c in m.calls)
+                assert m.call(170,gap=0)==11 and m.nodes[m.top]['name']=='playing_page'
+                assert m.call(170,gap=0)==0
+                m.call(170,address=0x52c248,args=(m.top,m.event,0,0),gap=0)
+                assert m.top==browse, (existing,visit,[m.nodes[p]['name'] for p in m.order])
+                m.paint(w,gap=0); assert (m.selected(w),m.get(w+O['SCROLL_Y']))==(selected,offset)
+            passed()
+    m=NavigationMachine(); m.page('folder_page'); browse=m.top; m.order=[browse]; m.sync_order()
+    m.block_open=True; long_return(m); assert m.top==browse
+    assert m.call(170,gap=0)==11
+    m.block_open=False; m.animating=1; long_return(m); assert m.top==browse
+    passed()
 
 print(f'{checks} MIPS execution scenarios passed; toolkit services mocked, stock lock filter executed.')

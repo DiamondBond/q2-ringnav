@@ -4,7 +4,7 @@ Firmware mod for the Shanling Q2 that lets you use the scroll wheel to navigate 
 
 The touchscreen still works normally. Outside supported menus, the wheel continues to control volume.
 
-**Build variants: V3.3R (normal), V3.3C (compact)**
+**Build variants: V3.4R (normal), V3.4C (compact)**
 
 [**Download the latest release**](https://github.com/DiamondBond/q2-ringnav/releases/latest)
 
@@ -16,7 +16,7 @@ Make sure the Q2 is charged before updating, and do not remove the microSD card 
 2. Unzip it and copy `update.tar` to the root of the microSD card.
 3. On the Q2, open **System settings → System Update → TF card update**.
 4. Confirm the update and wait for the player to restart.
-5. Open **About** and confirm it shows `V3.3R` for normal or `V3.3C` for compact.
+5. Open **About** and confirm it shows `V3.4R` for normal or `V3.4C` for compact.
 
 To restore stock firmware through the UI, flash the [Shanling Q2 official firmware](https://en.shanling.com/download/150) using **System settings → System Update → TF card update**.
 
@@ -28,11 +28,11 @@ If the UI is not working, use [Shanling's recovery package](https://drive.google
 
 ## Variants
 
-### Normal: `Q2.Firmware.V3.3.zip`
+### Normal: `Q2.Firmware.V3.4.zip`
 
 Keeps the stock UI and existing controls, including long Return → Home.
 
-### Compact: `Q2.Firmware.V3.3-compact.zip`
+### Compact: `Q2.Firmware.V3.4-compact.zip`
 
 Uses a denser layout for Folder and Local Songs browsing:
 
@@ -45,9 +45,7 @@ Separate action bars, Play All/sort controls, tabs, editing controls and album g
 
 The folder artwork setting and saved preferences are preserved.
 
-In compact mode, long Return opens **Now Playing** without restarting playback, including when audio is already playing. On the Now Playing screen, Return still goes back normally whether tapped or held.
-
-Short Return keeps the stock Back action and nested-folder navigation. Other long presses are unchanged. The proposed short Return shortcut on Home is not included.
+In compact mode, holding Return opens **Now Playing** without restarting playback, including when audio is already playing. Releasing the hold leaves you there, and the next short Return goes back to the page you came from with its position preserved. Holding Return while already on Now Playing uses the stock Home shortcut. Short Return otherwise keeps the stock Back action and nested-folder navigation. Other long presses are unchanged. The proposed short Return shortcut on Home is not included.
 
 ## Controls
 
@@ -60,6 +58,9 @@ Short Return keeps the stock Back action and nested-folder navigation. Other lon
 - **Swipe takeover:** Turning the wheel during a swipe stops scrolling and gives control back to the wheel.
 - **Selection position:** Wheel navigation and restored selections keep a small margin from the screen edge where possible.
 - **Position memory:** Returning to a recently visited folder, album, query or settings menu restores its selection and scroll position. Up to 64 browsing positions are remembered until power-off.
+- **List ends:** On the local folder and music lists, turning past the first or last item nudges the selection outline against the end. One more turn in the same direction wraps to the other end of the same list. Settings menus, grids and dynamic pages keep their normal ends.
+- **Scrollbar:** While the wheel moves through a list that has one, the player's own scrollbar appears and fades on its usual timer. Lists without a native scrollbar are unchanged.
+- **Search results:** The local and online search result lists navigate with the wheel and the centre button. The on-screen keyboard dialogs keep the wheel on volume control.
 - **Re-sorted lists:** Recreated non-virtual lists in the same remembered context try to restore the selected row by its text.
 - **Selection outline:** Touching the screen hides the custom outline until the next accepted wheel or centre input. After a swipe settles, the row nearest the middle becomes selected for wheel or centre use.
 - **Unsupported menus:** The wheel returns to normal volume control.
@@ -72,6 +73,8 @@ The Home screen keeps its normal selected-card appearance without the extra outl
 If you find a menu that behaves strangely, please open an issue and include the screen you were on and what you did.
 
 ## Changelog
+
+- **V3.4R / V3.4C**: The local folder and music lists carry over at their ends: the first turn past an end nudges the selection outline against the end, and the next turn in the same direction wraps to the other end of the same list. Wheel navigation now wakes the player's own scrollbar, which fades on its normal timer, instead of drawing a separate position bar. The local and online search result lists navigate with the wheel and the centre button. Compact Return now opens Now Playing on hold and stays there after release; the next short Return goes back to where you were, and holding Return while already on Now Playing uses the stock Home shortcut. This replaces the V3.3 single-press latch behavior.
 
 - **V3.3R / V3.3C**: Compact returns from Now Playing with a single Return press again; the stock hold-release latch is cleared on that page instead of swallowing the release and forcing a second press.
 

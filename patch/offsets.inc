@@ -44,12 +44,18 @@
 #define SHADE_ALPHA 0xb3
 #define OUTLINE_RGB 0xffffff
 #define OUTLINE_ALPHA 0xb3
+/* End bump and wrap, audited row lists only (see ring_list in patch/ringnav.c). The first detent
+ * past an end nudges the outline and arms; the next same-direction detent within EDGE_ARM_MS
+ * moves to the other end of the same list. */
+#define BUMP_PX 6
+#define BUMP_MS 120
+#define EDGE_ARM_MS 800
+#define BAR_VALUE 0x7c /* scroll_bar native value, maintained by list/table setters */
 #define KEY_CENTER 218
 #define KEY_PREV 172
 #define KEY_NEXT 173
 #define KEY_PLAY 171
 #define BOOT_KEY_GUARD 0xa37c8a /* raw flag address, no symbol in the audited binary */
-#define RETURN_RELEASE_LATCH 0xa37c8b /* stock long Return arms it; the next Return keyup is consumed */
 
 /* slide_menu_scroll_to @0x5f3400 and completion @0x5f3654; animator
  * start @0x665ab0, time_elapse @0x6660d4, scroll_set_params @0x682124. */

@@ -13,9 +13,12 @@ import tempfile
 import zipfile
 from build import ROOT, VERSIONS, ZIP_SHA, DEMO_SHA, build, check, run, sha, source_sha256
 
-TAG = '3.3R'
-ASSETS = {'normal': 'Q2.Firmware.V3.3.zip', 'compact': 'Q2.Firmware.V3.3-compact.zip'}
-NOTES = '''- Compact: a single Return press on Now Playing goes back again. The stock hold-release latch is cleared on that page instead of swallowing the release and forcing a second press.
+TAG = '3.4R'
+ASSETS = {'normal': 'Q2.Firmware.V3.4.zip', 'compact': 'Q2.Firmware.V3.4-compact.zip'}
+NOTES = '''- List ends: the first turn past an end nudges the selection outline against the end, and the next turn in the same direction wraps to the other end of the local folder and music lists.
+- The player's own scrollbar now appears during wheel navigation and fades on its normal timer.
+- The local and online search result lists navigate with the wheel and the centre button.
+- Compact Return: hold opens Now Playing and stays there after release; the next short Return goes back to where you were, and holding Return on Now Playing uses the stock Home shortcut.
 '''
 
 

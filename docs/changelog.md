@@ -1,5 +1,7 @@
 # Changelog
 
+- **V3.4R / V3.4C**: The local folder and music lists carry over at their ends: the first turn past an end nudges the selection outline against the end, and the next turn in the same direction wraps to the other end of the same list. Wheel navigation now wakes the player's own scrollbar, which fades on its normal timer, instead of drawing a separate position bar. The local and online search result lists navigate with the wheel and the centre button; the on-screen keyboard dialogs keep the wheel on volume control. Compact Return now opens Now Playing on hold and stays there after release; the next short Return goes back to where you were, and holding Return while already on Now Playing uses the stock Home shortcut. This replaces the V3.3 single-press latch behavior.
+
 - **V3.3R / V3.3C**: Compact returns from Now Playing with a single Return press again; the stock hold-release latch is cleared on that page instead of swallowing the release and forcing a second press.
 
 - **V3.2R / V3.2C**: Compact rows now fill the client area with 72-pixel rows, so the stock artwork keeps its natural size with an even eight-pixel inset instead of being scaled down. Navigation and all other behavior are unchanged.

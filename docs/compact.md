@@ -1,6 +1,6 @@
 # Compact audit and device checks
 
-V3.3R and V3.3C share one navigation payload. `--compact` enables a single extra
+V3.4R and V3.4C share one navigation payload. `--compact` enables a single extra
 payload function and build-time edits in `tools/compact.py`; normal receives no
 compact executable sites or UI assets. `patch/compact.json` records the original
 asset hashes and full MIPS instructions. The builder also pins the complete stock
@@ -36,12 +36,14 @@ cover callbacks keep the same widget geometry and saved cover preferences.
 The stock long-key function at 0x4e873c retains all instructions except the final
 Home call at 0x4e8924. Stock power, lock, test and key-lock gates and its release
 latch execute first. Compact cancels centre confirmation and spin state, checks
-the shared screen/navigation restrictions, then calls the stock switch function
-with `playing_page` and `{0, 0, 0xff, 2}`. The `0xff` context skips player_start.
-The stock key-up filter consumes the following release, except when Now Playing
-is already the top window: the latch is cleared there so the same release still
-reaches the stock short Return and one press goes back. No short-Return callback
-or other long-key destination changes.
+the shared screen/navigation restrictions, and then either calls the stock Home
+destination when Now Playing is already the top window, or calls the stock switch
+function with `playing_page` and `{0, 0, 0xff, 2}`. The `0xff` context skips
+player_start, so playback is not restarted. The stock key-up filter consumes the
+release of every handled hold, so the unit stays on Now Playing. The next short
+Return reaches the stock Back path and position memory restores the browsing page
+and its selection. No short-Return callback or other long-key destination
+changes.
 
 ## Device checklist
 
@@ -60,12 +62,20 @@ Run this over both builds when validating a release.
   and correct artwork indexing after child/grandchild returns. Test both saved
   album display modes.
 - **return**: Short Return traverses folders and other pages as stock. Hold Return
-  and release, repeat holds, try already playing and an empty playback queue.
-  Compact opens/stays on Now Playing without restarting audio; normal opens Home.
-  A held Return on Now Playing itself must still go back with one press.
-  Arm centre confirmation then hold Return; no delayed item should open. Repeat
-  screen-off, locked, power-off/USB/BT restrictions and modal-blocked navigation.
-  Other long keys must remain stock.
+  from browsing and release: compact opens Now Playing without restarting audio
+  and stays there; the next short Return goes back to the same page, selection and
+  scroll position. Hold Return while already on Now Playing: the stock Home
+  shortcut runs. Normal opens Home as before. Repeat holds and visits, try already
+  playing and an empty playback queue, and confirm the next short Return still
+  works after each visit. Arm centre confirmation then hold Return; no delayed
+  item should open. Repeat screen-off, locked, power-off/USB/BT restrictions and
+  modal-blocked navigation. Other long keys must remain stock.
+- **scrollbar**: Turn the wheel in Folder, Local Songs and a long settings list.
+  Confirm the player's own right-edge scrollbar appears as the list moves, tracks
+  the position and fades on its own; check lists without a native bar stay
+  unchanged. Touch-scroll and then turn the wheel to confirm the handoff, and
+  leave a wheel-scrolled page to confirm no bar or timer returns on the next
+  screen.
 - **retained_controls**: Use tabs, Play All, sorting, playlist import/export,
   rename/delete and all separately retained action/editing controls. Verify
   remembered selection after sorting and folder/album/query returns.

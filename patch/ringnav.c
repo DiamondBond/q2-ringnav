@@ -53,6 +53,11 @@ typedef struct {
     position_t pos[POS_MEM]; /* most recently selected first; keyed by context and scope */
     void *reveal_surface;    /* surface of the interrupted recall glide, 0 when none */
     int reveal_id;           /* logical row that glide was bringing into view */
+    /* Bump repaint and wrap arm; the widget token rejects recycled surfaces. */
+    void *fx_surface;
+    int fx_token, bump_dir, edge_dir, edge_id;
+    unsigned fx_timer, bump_until, edge_time;
+    void *edge_surface; /* ring list whose end the bump signalled */
 } scratch_t;
 static scratch_t st __attribute__((section(".scratch")));
 
@@ -83,6 +88,18 @@ static int context_id(const char *name) {
     for (unsigned i = 0; i < sizeof(contexts) / sizeof(*contexts); ++i)
         if (!tk_strcmp(name, contexts[i].name)) return (int)i;
     return -1;
+}
+
+/* The audited local row lists built from the compact assets: the file and music views. Grids
+ * (album_page), settings menus, dynamic pages and the home carousel keep hard ends. */
+static int ring_list(const menu_t *m) {
+    static const char *const lists[] = { "folder_page",    "localmusic_page", "allmusic_page",
+                                         "albuminfo_page", "artistinfo_page", "localclass_page",
+                                         "playlist_page" };
+    if (!m->w || m->ctx < 0 || m->rows < 2) return 0;
+    for (unsigned i = 0; i < sizeof(lists) / sizeof(*lists); ++i)
+        if (!tk_strcmp(contexts[m->ctx].name, lists[i])) return 1;
+    return 0;
 }
 
 /* The view kinds load() actually navigates: a vertical scroll view, a table client or a slide
@@ -193,6 +210,7 @@ static void collect(void *w, entries_t *s, int depth) {
 #define TOUCH "_ringnav_touch"
 #define COUNT "_ringnav_count"
 #define SCOPE "_ringnav_scope"
+#define FX "_ringnav_fx"
 
 static void cancel_center(void) {
     unsigned timer = st.center_timer;
@@ -323,6 +341,50 @@ static void prop(void *w, const char *name, int value) {
     if (widget_get_prop_int(w, name, -1) != value) widget_set_prop_int(w, name, value);
 }
 
+/* The bump timer repaints at 120 ms; the second-detent arm survives independently. */
+static void fx_cancel(void) {
+    if (st.fx_timer) timer_remove(st.fx_timer);
+    st.fx_timer = 0;
+    st.fx_surface = st.edge_surface = (void *)0;
+    st.bump_dir = 0;
+}
+
+static int fx_live(void *w) {
+    return w == st.fx_surface && widget_get_prop_int(w, FX, 0) == st.fx_token;
+}
+
+static int fx_expire(const void *info) {
+    (void)info;
+    st.fx_timer = 0;
+    void *w = surface((void *)0, (void *)0);
+    st.bump_dir = 0;
+    if (w && fx_live(w)) widget_invalidate_force(w, (void *)0);
+    return 0;
+}
+
+static void fx_arm(void *w, unsigned now) {
+    if (st.fx_timer) timer_remove(st.fx_timer);
+    st.fx_timer = timer_add(fx_expire, (void *)0, BUMP_MS);
+    st.fx_token = st.fx_token == 0x7fffffff ? 1 : st.fx_token + 1;
+    st.fx_surface = w;
+    st.bump_until = now + BUMP_MS;
+    prop(w, FX, st.fx_token);
+}
+
+/* A boundary detent arms only while the selection stays on that row; leaving it, reversing or
+ * waiting longer than EDGE_ARM_MS makes the next boundary detent bump again instead of wrapping. */
+static int edge_live(const menu_t *m, int id, int dir, unsigned now) {
+    return id >= 0 && fx_live(m->w) && st.edge_surface == m->w && st.edge_id == id &&
+           st.edge_dir == dir && (int)(now - st.edge_time) <= EDGE_ARM_MS;
+}
+
+static void edge_arm(const menu_t *m, int id, int dir, unsigned now) {
+    st.edge_surface = m->w;
+    st.edge_id = id;
+    st.edge_dir = dir;
+    st.edge_time = now;
+}
+
 /* FNV-1a of the first two non-empty text properties in a small row subtree: the item's own name
  * and an optional subtitle, in pre-order. Each stays 0 while its text has not been seen. No stock
  * list row carries a stable id: emitter tags and pointer props are unused by the app rows (only
@@ -392,6 +454,11 @@ static int context_now(unsigned *scope) {
     } else if (contexts[ctx].kind == CTX_FIXED) {
         *scope = 1;
     } else {
+        if (!tk_strcmp(name, "search_dialog") || !tk_strcmp(name, "tidal_search_dialog")) {
+            void *edit = widget_lookup(top, "search_edit", 1);
+            row_id_t query = row_id(edit);
+            *scope = query.one;
+        }
         /* Network/detail pages without an audited content key keep widget-owned selection, but
          * never import another page's row. */
         return -1;
@@ -487,6 +554,7 @@ static int load(menu_t *m, void *w, int recall) {
         prop(w, SCOPE, (int)m->scope);
         if (st.reveal_surface == w) st.reveal_surface = (void *)0;
     }
+    if (st.fx_surface && (st.fx_surface != w || scope != m->scope || count != m->rows)) fx_cancel();
     if (count != m->rows) {
         if (st.wheel_surface == w) st.wheel_run = 0;
         prop(w, SEL, -1);
@@ -710,6 +778,38 @@ static int confirm_center(const void *info) {
     return 0;
 }
 
+/* Clip the outline to its navigation surface; the caller restores `old`. */
+static int clip_menu(menu_t *m, void *canvas, rect_t *old, rect_t *clip) {
+    canvas_get_clip_rect(canvas, old);
+    int x = I(canvas, CANVAS_X), y = I(canvas, CANVAS_Y);
+    clip->x = old->x > x ? old->x : x;
+    clip->y = old->y > y ? old->y : y;
+    int right = old->x + old->w < x + I(m->w, W_W) ? old->x + old->w : x + I(m->w, W_W);
+    int bottom = old->y + old->h < y + m->height ? old->y + old->h : y + m->height;
+    clip->w = right - clip->x;
+    clip->h = bottom - clip->y;
+    return clip->w > 0 && clip->h > 0;
+}
+
+/* Native scroll_to with the bar's current value only wakes its opacity lifecycle.
+ * Stock setters retain ownership of thumb position. A transparent bar is still a bar.
+ * The native same-value path shows immediately, waits 300 ms and fades over 500 ms. */
+static void native_scrollbar(menu_t *m) {
+    if (m->kind == 3 || max_top(m) <= 0) return;
+    void *parent = P(m->w, W_PARENT);
+    if (!parent) return;
+    const char *type = widget_get_type(parent);
+    if (tk_strcmp(type, "list_view") && tk_strcmp(type, "table_view")) return;
+    unsigned n = widget_count_children(parent);
+    for (unsigned i = 0; i < n; ++i) {
+        void *bar = widget_get_child(parent, i);
+        if (!tk_strcmp(widget_get_type(bar), "scroll_bar_m")) {
+            scroll_bar_scroll_to(bar, I(bar, BAR_VALUE), 500);
+            return;
+        }
+    }
+}
+
 /* Stock paints children first and calls this with the surface's canvas origin restored.
  * The selected row gets one neutral white outline seated on a dark shade line: the shade is the
  * stock dark surface at an alpha high enough to hold the white over bright album art, and being
@@ -737,51 +837,47 @@ int ringnav_paint(void *w, void *canvas) {
     int i = reconcile(&g_menu,
                       !moving(&g_menu) && !window_manager_get_pointer_pressed(window_manager()));
     if (i < 0 || st.touch_mode) return result;
+    int fx = fx_live(w);
+    unsigned now = (unsigned)time_now_ms();
     rect_t r = bounds(&g_menu, i), old, clip;
-    if (r.w < 5 || r.h < 5 || !P(canvas, CANVAS_LCD)) return result;
-    canvas_get_clip_rect(canvas, &old);
-    int x = I(canvas, CANVAS_X), y = I(canvas, CANVAS_Y);
-    clip.x = old.x > x ? old.x : x;
-    clip.y = old.y > y ? old.y : y;
-    int right = old.x + old.w < x + I(w, W_W) ? old.x + old.w : x + I(w, W_W);
-    int bottom = old.y + old.h < y + g_menu.height ? old.y + old.h : y + g_menu.height;
-    clip.w = right - clip.x;
-    clip.h = bottom - clip.y;
-    if (clip.w <= 0 || clip.h <= 0) return result;
-    void *lcd = P(canvas, CANVAS_LCD);
-    unsigned fill_color = (unsigned)I(lcd, LCD_FILL_COLOR);
-    unsigned stroke_color = (unsigned)I(lcd, LCD_STROKE_COLOR);
-    canvas_set_clip_rect(canvas, &clip);
-    rect_t outer = { r.x + 1, r.y + 1, r.w - 2, r.h - 2 };
-    rect_t inner = { outer.x + 1, outer.y + 1, outer.w - 2, outer.h - 2 };
-    int drawn = 0;
-    /* Two concentric one-pixel rounded strokes, shade outside and white inside, not one
-     * border_width=2 call: the effect then does not depend on how a canvas backend interprets
-     * the width argument. Geometry is checked before the call, and radius 9/8 both stay above
-     * the stock "square at <= 2" cutoff. The stock rounded stroke returns non-zero when its
-     * backend cannot draw (for example a canvas without a vgcanvas), and the safe square
-     * fallback then keeps the outline visible. */
-    if (outer.w > 2 * RADIUS && outer.h > 2 * RADIUS) {
-        unsigned fill = FILL_COLOR;
-        canvas_fill_rounded_rect(canvas, &outer, (void *)0, &fill, RADIUS);
-        unsigned shade = SHADE_COLOR;
-        unsigned white = OUTLINE_COLOR;
-        drawn = canvas_stroke_rounded_rect(canvas, &outer, (void *)0, &shade, RADIUS, 1) == 0;
-        if (drawn)
-            drawn =
-                canvas_stroke_rounded_rect(canvas, &inner, (void *)0, &white, RADIUS - 1, 1) == 0;
+    /* A boundary detent nudges the outline against the end until it springs back. */
+    if (fx && st.bump_dir && (int)(st.bump_until - now) > 0) r.y -= st.bump_dir * BUMP_PX;
+    if (r.w >= 5 && r.h >= 5 && P(canvas, CANVAS_LCD) && clip_menu(&g_menu, canvas, &old, &clip)) {
+        void *lcd = P(canvas, CANVAS_LCD);
+        unsigned fill_color = (unsigned)I(lcd, LCD_FILL_COLOR);
+        unsigned stroke_color = (unsigned)I(lcd, LCD_STROKE_COLOR);
+        canvas_set_clip_rect(canvas, &clip);
+        rect_t outer = { r.x + 1, r.y + 1, r.w - 2, r.h - 2 };
+        rect_t inner = { outer.x + 1, outer.y + 1, outer.w - 2, outer.h - 2 };
+        int drawn = 0;
+        /* Two concentric one-pixel rounded strokes, shade outside and white inside, not one
+         * border_width=2 call: the effect then does not depend on how a canvas backend
+         * interprets the width argument. Geometry is checked before the call, and radius 9/8
+         * both stay above the stock "square at <= 2" cutoff. The stock rounded stroke returns
+         * non-zero when its backend cannot draw (for example a canvas without a vgcanvas), and
+         * the safe square fallback then keeps the outline visible. */
+        if (outer.w > 2 * RADIUS && outer.h > 2 * RADIUS) {
+            unsigned fill = FILL_COLOR;
+            canvas_fill_rounded_rect(canvas, &outer, (void *)0, &fill, RADIUS);
+            unsigned shade = SHADE_COLOR;
+            unsigned white = OUTLINE_COLOR;
+            drawn = canvas_stroke_rounded_rect(canvas, &outer, (void *)0, &shade, RADIUS, 1) == 0;
+            if (drawn)
+                drawn = canvas_stroke_rounded_rect(canvas, &inner, (void *)0, &white, RADIUS - 1,
+                                                   1) == 0;
+        }
+        if (!drawn) {
+            canvas_set_stroke_color(canvas, SHADE_COLOR);
+            canvas_stroke_rect(canvas, outer.x, outer.y, outer.w, outer.h);
+            canvas_set_stroke_color(canvas, OUTLINE_COLOR);
+            canvas_stroke_rect(canvas, inner.x, inner.y, inner.w, inner.h);
+        }
+        /* Save/restore explicitly: this firmware's canvas_save/restore cover neither clip nor
+         * either color, and the global alpha is deliberately never touched. */
+        canvas_set_fill_color(canvas, fill_color);
+        canvas_set_stroke_color(canvas, stroke_color);
+        canvas_set_clip_rect(canvas, &old);
     }
-    if (!drawn) {
-        canvas_set_stroke_color(canvas, SHADE_COLOR);
-        canvas_stroke_rect(canvas, outer.x, outer.y, outer.w, outer.h);
-        canvas_set_stroke_color(canvas, OUTLINE_COLOR);
-        canvas_stroke_rect(canvas, inner.x, inner.y, inner.w, inner.h);
-    }
-    /* Save/restore explicitly: this firmware's canvas_save/restore cover neither clip nor
-     * either color, and the global alpha is deliberately never touched. */
-    canvas_set_fill_color(canvas, fill_color);
-    canvas_set_stroke_color(canvas, stroke_color);
-    canvas_set_clip_rect(canvas, &old);
     return result;
 }
 
@@ -797,6 +893,7 @@ int ringnav_touch(void *ctx, void *event) {
     /* A tap is a fresh interaction: it cancels a pending screen-toggle pair and any spin. */
     cancel_center();
     drop_spin();
+    fx_cancel();
     void *w = surface((void *)0, (void *)0);
     /* Pointer-down must not recall/rebind the row that native touch is about to hit. */
     if (!result && w && load_rows(&g_menu, w)) {
@@ -825,6 +922,7 @@ int ringnav_dispatch(void *target, void *event) {
         hide_outline();
         cancel_center(); /* A native activation supersedes confirmation, even without touch. */
         drop_spin();
+        fx_cancel();
         void *other = (void *)0;
         void *w = surface(target, &other);
         /* A tap owns its live row: recall could scroll/rebind that row before delivery. */
@@ -845,19 +943,20 @@ int ringnav_dispatch(void *target, void *event) {
 }
 
 #if COMPACT
+
 /* Called only by stock long Return, after its power/lock gates and release guard. */
 int compact_now_playing(void) {
     cancel_center();
     drop_spin();
     void *top = window_manager_get_top_window(window_manager());
-    /* Already on Now Playing: the switch below is a self-switch, but stock has armed its
-     * hold-release latch before this call. Clear it so the release still reaches the page's own
-     * short Return, instead of being swallowed and forcing a second press. */
-    if (top && !tk_strcmp(widget_get_prop_str(top, "name", ""), "playing_page"))
-        *(volatile unsigned char *)RETURN_RELEASE_LATCH = 0;
-    if (usable()) {
-        static const int context[4] = { 0, 0, 0xff, 2 };
-        navigator_switch_to_with_context("playing_page", context, 0);
+    fx_cancel();
+    if (usable() && top && !window_manager_is_animating(window_manager())) {
+        if (!tk_strcmp(widget_get_prop_str(top, "name", ""), "playing_page"))
+            navigator_back_to_home();
+        else {
+            static const int context[4] = { 0, 0, 0xff, 2 };
+            navigator_switch_to_with_context("playing_page", context, 0);
+        }
     }
     return 0;
 }
@@ -880,9 +979,10 @@ int ringnav(void *ctx, void *event) {
     }
     unsigned key = (unsigned)I(event, EVENT_KEY);
     if (key != KEY_CENTER && key != KEY_PREV && key != KEY_NEXT) return result;
-    if (key == KEY_CENTER)
+    if (key == KEY_CENTER) {
         drop_spin();
-    else
+        fx_cancel();
+    } else
         cancel_center();
     if (st.center_timer && (unsigned)time_now_ms() - st.last_center >= DOUBLE_CLICK_MS) {
         unsigned timer = st.center_timer;
@@ -966,6 +1066,7 @@ int ringnav(void *ctx, void *event) {
         return STOP;
     }
     int step = wheel_step(&g_menu, top, dir, now);
+    native_scrollbar(&g_menu);
     if (g_menu.kind == 3) {
         if (dir > 0)
             slide_menu_scroll_to_next(w);
@@ -977,10 +1078,24 @@ int ringnav(void *ctx, void *event) {
                               id < 0 ? 0 : dir * step);
         if (next == 0 || next == g_menu.rows - 1) st.wheel_run = 0;
         if (next == id) {
-            stop_scroll(&g_menu);
-            widget_invalidate_force(w, (void *)0); /* a wheel wake still clears touch hiding */
-            return STOP;
+            if (!ring_list(&g_menu) || id < 0) {
+                stop_scroll(&g_menu);
+                widget_invalidate_force(w, (void *)0); /* a wheel wake still clears touch hiding */
+                return STOP;
+            }
+            if (!edge_live(&g_menu, id, dir, now)) {
+                edge_arm(&g_menu, id, dir, now);
+                st.bump_dir = dir;
+                fx_arm(w, now);
+                stop_scroll(&g_menu);
+                widget_invalidate_force(w, (void *)0);
+                return STOP;
+            }
+            /* Second detent at the same end: carry over to the other end of this list. */
+            st.bump_dir = 0;
+            next = dir > 0 ? 0 : g_menu.rows - 1;
         }
+        st.edge_surface = (void *)0; /* left the end: the next boundary detent bumps again */
         select(&g_menu, next);
         /* Stop momentum even when the selected row already fits the viewport. */
         reveal(&g_menu, next, 1);
