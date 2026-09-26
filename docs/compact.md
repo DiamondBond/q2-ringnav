@@ -39,11 +39,13 @@ latch execute first. Compact cancels centre confirmation and spin state, checks
 the shared screen/navigation restrictions, and then either calls the stock Home
 destination when Now Playing is already the top window, or calls the stock switch
 function with `playing_page` and `{0, 0, 0xff, 2}`. The `0xff` context skips
-player_start, so playback is not restarted. The stock key-up filter consumes the
-release of every handled hold, so the unit stays on Now Playing. The next short
-Return reaches the stock Back path and position memory restores the browsing page
-and its selection. No short-Return callback or other long-key destination
-changes.
+player_start, so playback is not restarted. The switch keeps the hold's key-up
+from reaching the stock release filter, which would leave the latch that filter
+shares armed and swallow the next Return, so the payload clears that latch once
+the switch has landed. The hold's release therefore leaves the unit on Now
+Playing and the first short Return reaches the stock Back path, with position
+memory restoring the browsing page and its selection. No short-Return callback or
+other long-key destination changes.
 
 ## Device checklist
 

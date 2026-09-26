@@ -939,14 +939,21 @@ int ringnav_dispatch(void *target, void *event) {
 int compact_now_playing(void) {
     cancel_center();
     drop_spin();
-    void *top = window_manager_get_top_window(window_manager());
+    void *wm = window_manager();
+    void *top = window_manager_get_top_window(wm);
     fx_cancel();
-    if (usable() && top && !window_manager_is_animating(window_manager())) {
+    if (usable() && top && !window_manager_is_animating(wm)) {
         if (!tk_strcmp(widget_get_prop_str(top, "name", ""), "playing_page"))
             navigator_back_to_home();
         else {
             static const int context[4] = { 0, 0, 0xff, 2 };
             navigator_switch_to_with_context("playing_page", context, 0);
+            /* The window switch stops the hold's key-up from reaching the stock release
+             * filter, so the latch it armed would otherwise swallow the next Return. Drop it
+             * once the switch really landed, so the first short Return goes back. */
+            void *now = window_manager_get_top_window(wm);
+            if (now && !tk_strcmp(widget_get_prop_str(now, "name", ""), "playing_page"))
+                *(volatile unsigned char *)RETURN_RELEASE_LATCH = 0;
         }
     }
     return 0;

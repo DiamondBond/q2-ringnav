@@ -598,7 +598,8 @@ for page in ('home_page', 'folder_page', 'playing_page', 'sysset_page'):
     if variant == 'compact' and page != 'playing_page':
         assert m.text(dest[0][1]) == 'playing_page'
         assert [m.get(dest[0][2] + 4*i) for i in range(4)] == [0, 0, 255, 2]
-    # Every handled hold swallows its own release, including the Home shortcut.
+    # Here the navigator is only recorded, so the switch never lands and the latch is left
+    # armed; the NavigationMachine checks below cover the landed switch that drops it.
     held = 11
     assert m.call(170, gap=0) == held
     assert m.call(170, gap=0) == 0   # next short Return still reaches stock Back
@@ -1903,8 +1904,10 @@ if variant=='compact':
                 long_return(m)
                 assert m.nodes[m.top]['name']=='playing_page'
                 assert not any(c[0]=='player_start' for c in m.calls)
-                assert m.call(170,gap=0)==11 and m.nodes[m.top]['name']=='playing_page'
-                assert m.call(170,gap=0)==0
+                # The switch dropped the hold-release latch: the hold's release is ignored
+                # and the first short Return goes back instead of being swallowed.
+                assert m.u.mem_read(O['RETURN_RELEASE_LATCH'],1)==b'\0'
+                assert m.call(170,gap=0)==0 and m.nodes[m.top]['name']=='playing_page'
                 m.call(170,address=0x52c248,args=(m.top,m.event,0,0),gap=0)
                 assert m.top==browse, (existing,visit,[m.nodes[p]['name'] for p in m.order])
                 m.paint(w,gap=0); assert (m.selected(w),m.get(w+O['SCROLL_Y']))==(selected,offset)
