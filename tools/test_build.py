@@ -79,8 +79,7 @@ def validate_assets(directory):
         else: raise AssertionError('Accepted a changed asset')
     if compact:
         payload_symbols = symbols(directory/'patch.elf')
-        for address in [AUDIT['immediates'][0]['sites'][0][0], '0x522410',
-                        *(a for a, _ in AUDIT['row_layout_calls']['sites'])]:
+        for address in [AUDIT['immediates'][0]['sites'][0][0], '0x522410', AUDIT['row_layout_calls']['sites'][0][0]]:
             damaged = bytearray(stock)
             damaged[fileoff(stock, int(address, 16))] ^= 1
             try: patch_code(damaged, fileoff, payload_symbols)

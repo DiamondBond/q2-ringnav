@@ -583,7 +583,7 @@ ARTWORK = {
 def native_row_layout(m, button):
     # Run the real stock layout dispatcher and horizontal layouter. Mock only toolkit
     # collection/geometry services, not the width arithmetic or native child positioning.
-    for name in ('widget_layout_children',): m.handlers.pop(syms[name],None)
+    m.handlers.pop(syms['widget_layout_children'],None)
     for name in ('widget_vtable_on_layout_children', 'widget_layout_self',
                  'widget_layout_floating_children', 'widget_get_children_for_layout',
                  'darray_init', 'darray_deinit', 'widget_move_resize_ex'):
