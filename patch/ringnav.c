@@ -935,6 +935,57 @@ int ringnav_dispatch(void *target, void *event) {
 
 #if COMPACT
 
+/* Only audited ordinary row constructors install this per-instance layouter. Stock still
+ * positions every child, skips hidden controls, and owns clone/destruction and text overflow. */
+static int compact_row_layout(void *layout, void *row) {
+    void *text = (void *)0, *title = (void *)0;
+    unsigned count = widget_count_children(row);
+    /* Names differ (view_info, viewinfo_N, ...); all seven constructors put the title
+     * first, either directly in the row or one level inside its text container. */
+    for (unsigned i = 0; i < count && !text; ++i) {
+        void *child = widget_get_child(row, i);
+        if (!tk_strcmp(widget_get_type(child), "hscroll_label")) text = title = child;
+        for (unsigned j = 0; j < widget_count_children(child) && !text; ++j) {
+            void *label = widget_get_child(child, j);
+            if (!tk_strcmp(widget_get_type(label), "hscroll_label")) {
+                text = child;
+                title = label;
+            }
+        }
+    }
+    if (text && widget_get_visible(text)) {
+        int width = I(row, W_W) - 2 * B(layout, DEFAULT_LAYOUT_X_MARGIN);
+        for (unsigned i = 0; i < count; ++i) {
+            void *child = widget_get_child(row, i);
+            if (child != text && widget_get_visible(child))
+                width -= I(child, W_W) + B(layout, DEFAULT_LAYOUT_SPACING);
+        }
+        if (width < 0) width = 0;
+        widget_resize(text, width, I(text, W_H));
+        if (title != text) {
+            int available = width - I(title, W_X);
+            widget_resize(title, available > 0 ? available : 0, I(title, W_H));
+        }
+    }
+    return ((int (*)(void *, void *))((const unsigned *)DEFAULT_LAYOUT_VTABLE)[2])(layout, row);
+}
+
+int compact_set_row_layout(void *row, const char *params) {
+    static unsigned vtable[8] __attribute__((section(".scratch")));
+    int ret = widget_set_children_layout(row, params);
+    if (ret || !row) return ret;
+    void *layout = P(row, W_CHILDREN_LAYOUT);
+    if (layout) {
+        if (!vtable[0]) {
+            for (unsigned i = 0; i < 8; ++i)
+                vtable[i] = ((const unsigned *)DEFAULT_LAYOUT_VTABLE)[i];
+            vtable[2] = (unsigned)compact_row_layout;
+        }
+        P(layout, CHILDREN_LAYOUT_VTABLE) = vtable;
+    }
+    return ret;
+}
+
 /* Called only by stock long Return, after its power/lock gates and release guard. */
 int compact_now_playing(void) {
     cancel_center();

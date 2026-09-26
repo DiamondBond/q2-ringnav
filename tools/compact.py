@@ -137,6 +137,11 @@ def patch_code(data, fileoff, symbols):
         for address, instruction in group['sites']:
             old = int(instruction, 16)
             word(int(address, 16), old, (old & 0xffff0000) | value, group['purpose'])
+    group = AUDIT['row_layout_calls']
+    for address, instruction in group['sites']:
+        word(int(address, 16), int(instruction, 16),
+             0x0c000000 | (symbols['compact_set_row_layout'] >> 2), group['purpose'])
+    word(0x522410, 0x0320f809, 0, 'folder rebind retains the width owned by its row layouter')
     # Only the final long-Return call changes. All stock gates and its release guard precede it.
     word(0x4e8924, 0x04110fdf, 0x0c000000 | (symbols['compact_now_playing'] >> 2),
          'long Return destination after stock input gates')

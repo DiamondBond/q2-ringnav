@@ -1,7 +1,7 @@
 # Compact audit and device checks
 
-V3.4R and V3.4C share one navigation payload. `--compact` enables a single extra
-payload function and build-time edits in `tools/compact.py`; normal receives no
+V3.5R and V3.5C share one navigation payload. `--compact` enables compact-only
+payload helpers and build-time edits in `tools/compact.py`; normal receives no
 compact executable sites or UI assets. `patch/compact.json` records the original
 asset hashes and full MIPS instructions. The builder also pins the complete stock
 ZIP and executable, rejects mismatches, and records every changed asset/site.
@@ -33,6 +33,17 @@ The category cover callback originally divides by 120 despite using 78-pixel
 rows; compact corrects its audited divisor at 0x4b0608 to 72. Rebinding and delayed
 cover callbacks keep the same widget geometry and saved cover preferences.
 
+Seven audited row-constructor calls install a per-instance children layouter for
+folder, song, album-list, category, album-track, artist-track and playlist rows.
+Before the stock horizontal layout runs, it gives the title (and its containing
+view, where present) the row width minus the existing side margins, visible sibling
+widths and gaps. Hidden artwork and controls reserve no space. The stock layouter
+still positions the children, preserving the title's left edge, artwork, row height
+and padding. Its clone/destruction and parameter functions remain native; neither
+the shared widget implementation nor album grids are hooked. The folder rebind's
+140/190-pixel resize call is disabled so recycled titles retain their computed
+width. Title styles and scrolling/ellipsis settings are untouched.
+
 The stock long-key function at 0x4e873c retains all instructions except the final
 Home call at 0x4e8924. Stock power, lock, test and key-lock gates and its release
 latch execute first. Compact cancels centre confirmation and spin state, checks
@@ -54,7 +65,11 @@ Run this over both builds when validating a release.
 - **readability**: Browse Folder and Local Songs, artists, genres, albums, album
   tracks, artist tracks/albums and playlists. Check all four complete ordinary
   rows, long filenames, two-line metadata, non-Latin text and the selection
-  outline. Touch and centre must activate the same item at every row and edge.
+  outline. Titles should use the formerly empty right-hand space up to the row's
+  padding or visible trailing control, without overlap. Repeat after scrolling,
+  page reopening and artwork/control visibility changes; short titles should stay
+  at the same left position and overflowing titles should still scroll/ellipsize.
+  Touch and centre must activate the same item at every row and edge.
 - **toolbar**: Compact hides the entire primary toolbar (including Home,
   search/multi-select and Now Playing icons), keeps the status bar, and reclaims
   its space after page recreation and nested folder returns. Normal stays stock.

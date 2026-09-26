@@ -140,5 +140,17 @@
         ["0x4a8cd8", "0x240200be"]
       ]
     }
-  ]
+  ],
+  "row_layout_calls": {
+    "purpose": "fit ordinary row titles and their containers on every native relayout",
+    "sites": [
+      ["0x52315c", "0x0320f809"],
+      ["0x4aa3f0", "0x0320f809"],
+      ["0x4b101c", "0x0320f809"],
+      ["0x4a4c34", "0x0320f809"],
+      ["0x4a6394", "0x0320f809"],
+      ["0x4adea4", "0x0320f809"],
+      ["0x4b2944", "0x0320f809"]
+    ]
+  }
 }

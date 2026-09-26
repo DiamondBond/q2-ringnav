@@ -8,6 +8,11 @@
 #define W_FOCUS 0x24            /* stock focused flag byte (tests) */
 #define W_PARENT 0x48
 #define W_EMITTER 0x60
+#define W_CHILDREN_LAYOUT 0x68
+#define CHILDREN_LAYOUT_VTABLE 0x10
+#define DEFAULT_LAYOUT_X_MARGIN 0x18
+#define DEFAULT_LAYOUT_SPACING 0x1a
+#define DEFAULT_LAYOUT_VTABLE 0x926b20
 #define EMIT_TYPE 0x08
 #define EMIT_PENDING_REMOVE 0x15
 #define EMIT_NEXT 0x20

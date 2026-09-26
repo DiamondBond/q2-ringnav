@@ -150,7 +150,7 @@ class Machine:
         self.calls.append((name,a,b,c))
         if name=='memcpy': self.u.mem_write(a,bytes(self.u.mem_read(b,c))); ret=a
         elif name=='memset': self.u.mem_write(a,bytes([b&255])*c); ret=a
-        elif name in ('table_row_create', 'button_create', 'image_create', 'view_create',
+        elif name in ('table_row_create', 'list_item_create', 'button_create', 'image_create', 'view_create',
                        'hscroll_label_create', 'gif_image_create'):
             kind = {'gif_image_create': 'gif'}.get(name, name.removesuffix('_create'))
             ret = self.node(kind)
@@ -160,7 +160,40 @@ class Machine:
             self.word(ret+O['W_PARENT'], a)
             self.nodes[a]['children'].append(ret)
         elif name=='widget_set_name': n['name']=self.text(b); ret=0
-        elif name=='widget_set_children_layout': n['children_layout']=self.text(b); ret=0
+        elif name=='widget_set_text_utf8': n['text']=self.text(b); ret=0
+        elif name=='widget_use_style': n['style']=self.text(b); ret=0
+        elif name.startswith('hscroll_label_set_') or name=='set_hscroll_label_attribute':
+            n[name]=b if name!='set_hscroll_label_attribute' else True; ret=0
+        elif name=='image_set_draw_type': ret=a
+        elif name=='deque_at': ret=self.row_record
+        elif name=='deque_size': ret=1
+        elif name=='tk_snprintf':
+            fmt=self.text(c); values=[d]+[self.get(u.reg_read(UC_MIPS_REG_SP)+off) for off in (16,20,24)]
+            params=[self.text(value) if kind=='s' else signed(value)
+                    for kind,value in zip(re.findall(r'%([sd])',fmt),values)]
+            result=(fmt % tuple(params)).encode(); self.u.mem_write(a,result[:b-1]+b'\0'); ret=len(result)
+        elif name=='widget_set_children_layout':
+            n['children_layout']=self.text(b)
+            layout=self.alloc(32)
+            self.word(layout+O['CHILDREN_LAYOUT_VTABLE'],O['DEFAULT_LAYOUT_VTABLE'])
+            self.u.mem_write(layout+0x14,struct.pack('<HH',1,0))
+            for param,off in (('xm','DEFAULT_LAYOUT_X_MARGIN'),('s','DEFAULT_LAYOUT_SPACING')):
+                match=re.search(r'\b'+param+r'=(\d+)',self.text(b))
+                self.byte(layout+O[off],int(match[1]) if match else 0)
+            self.word(a+O['W_CHILDREN_LAYOUT'],layout); ret=0
+        elif name=='widget_resize':
+            self.word(a+O['W_W'],b); self.word(a+O['W_H'],c); ret=0
+        elif name=='widget_vtable_on_layout_children': ret=3
+        elif name in ('darray_init','darray_deinit','widget_layout_floating_children','widget_layout_self'): ret=0
+        elif name=='widget_get_children_for_layout':
+            children=[x for x in n['children'] if self.nodes[x]['visible']]
+            values=self.alloc(4*len(children)+4)
+            for i,child in enumerate(children): self.word(values+4*i,child)
+            self.word(b,len(children)); self.word(b+8,values); ret=0
+        elif name=='widget_move_resize_ex':
+            for off,value in zip(('W_X','W_Y','W_W','W_H'),(b,c,d,self.get(u.reg_read(UC_MIPS_REG_SP)+16))):
+                self.word(a+O[off],value)
+            ret=0
         elif name=='widget_lookup':
             def lookup(w):
                 if self.nodes[w].get('name')==self.text(b): return w
@@ -172,8 +205,8 @@ class Machine:
         elif name=='scroll_bar_cast': ret=a
         elif name=='scroll_bar_is_mobile': ret=n.get('type')=='scroll_bar_m'
         elif name=='widget_set_opacity': self.byte(a+0x34,b); ret=0
-        elif name in ('widget_set_visible_only','widget_set_sensitive'):
-            n['visible' if name=='widget_set_visible_only' else 'sensitive']=b; ret=0
+        elif name in ('widget_set_visible','widget_set_visible_only','widget_set_sensitive'):
+            n['sensitive' if name=='widget_set_sensitive' else 'visible']=b; ret=0
         elif name=='widget_animator_prop_create':
             ret=self.alloc(0x80); self.word(ret+4,a); self.word(ret+O['ANIM_DURATION'],b)
             self.word(ret+0x24,c); assert self.text(self.get(u.reg_read(UC_MIPS_REG_SP)+16))=='opacity'
@@ -204,7 +237,7 @@ class Machine:
                 self.timers[ret]=(self.now+c,a,b)
         elif name=='timer_remove': self.timers.pop(a,None); ret=0
         elif name=='screen_action': self.screens.append(a); ret=1
-        elif name=='tk_strcmp': ret=0 if a and b and self.text(a)==self.text(b) else -1
+        elif name in ('tk_strcmp','strcmp@GLIBC_2.0'): ret=0 if a and b and self.text(a)==self.text(b) else -1
         elif name=='stock_dispatch':
             if self.get(b)==O['EVT_CLICK']:
                 self.clicks.append(a)
@@ -546,6 +579,74 @@ ARTWORK = {
     0x4a4ae8: [('img_icon', (48, 0, 50, 70), (48, 0, 52, 68)),
                ('img_gifbg', (0, 9, 50, 52), (0, 8, 50, 52))],
 }
+
+def native_row_layout(m, button):
+    # Run the real stock layout dispatcher and horizontal layouter. Mock only toolkit
+    # collection/geometry services, not the width arithmetic or native child positioning.
+    for name in ('widget_layout_children',): m.handlers.pop(syms[name],None)
+    for name in ('widget_vtable_on_layout_children', 'widget_layout_self',
+                 'widget_layout_floating_children', 'widget_get_children_for_layout',
+                 'darray_init', 'darray_deinit', 'widget_move_resize_ex'):
+        m.handlers[syms[name]]=name
+    for node, props in m.nodes.items():
+        children=props['children']
+        if children:
+            array=m.alloc(12); values=m.alloc(4*len(children))
+            for i,child in enumerate(children): m.word(values+4*i,child)
+            m.word(array,len(children)); m.word(array+8,values); m.word(node+0x5c,array)
+    assert m.call(address=syms['widget_layout_children'],args=(button,0,0,0))==0
+
+def check_title_bounds(m, button):
+    children=m.nodes[button]['children']
+    text=next(c for c in children if m.nodes[c]['type']=='hscroll_label' or any(
+        m.nodes[t]['type']=='hscroll_label' for t in m.nodes[c]['children']))
+    title=next((c for c in m.nodes[text]['children'] if m.nodes[c]['type']=='hscroll_label'),text)
+    layout=m.get(button+O['W_CHILDREN_LAYOUT'])
+    vtable=m.get(layout+O['CHILDREN_LAYOUT_VTABLE'])
+    stock_vtable=O['DEFAULT_LAYOUT_VTABLE']
+    assert (vtable!=stock_vtable)==(variant=='compact')
+    # Clone, destroy, parameter and serialization functions remain native.
+    for i in (0,1,3,4,5,6,7): assert m.get(vtable+4*i)==m.get(stock_vtable+4*i)
+    margin=m.u.mem_read(layout+O['DEFAULT_LAYOUT_X_MARGIN'],1)[0]
+    gap=m.u.mem_read(layout+O['DEFAULT_LAYOUT_SPACING'],1)[0]
+    widths={c:m.get(c+O['W_W']) for c in children}
+    title_width=m.get(title+O['W_W'])
+    title_yh=(m.get(title+O['W_Y']),m.get(title+O['W_H']))
+    attributes={k:v for k,v in m.nodes[title].items() if k=='style' or 'hscroll' in k}
+    for artwork in (0,1):
+        for controls in (0,1):
+            for choice in (0,1):
+                for c in children:
+                    if c==text: continue
+                    name=m.nodes[c]['name']
+                    m.nodes[c]['visible']=choice if name.startswith('img_choice') else controls if c in children[children.index(text)+1:] else artwork
+                # Rebind the same row with different strings, then repeat layout (scroll/reuse).
+                for label in ('Short','A very long title '*12,'日本語の長い曲名と歌手 — සිංහල — العربية'):
+                    m.nodes[title]['text']=label
+                    native_row_layout(m,button)
+                    before=children[:children.index(text)]
+                    after=children[children.index(text)+1:]
+                    left=margin+sum(widths[c]+gap for c in before if m.nodes[c]['visible'])
+                    right=m.get(button+O['W_W'])-margin-sum(widths[c]+gap for c in after if m.nodes[c]['visible'])
+                    assert m.get(text+O['W_X'])==left
+                    if variant=='compact':
+                        assert left+m.get(text+O['W_W'])==right
+                        if title!=text:
+                            assert m.get(title+O['W_X'])+m.get(title+O['W_W'])==m.get(text+O['W_W'])
+                        cursor=right+gap
+                        for c in after:
+                            if m.nodes[c]['visible']:
+                                assert m.get(c+O['W_X'])==cursor
+                                cursor+=widths[c]+gap
+                        assert cursor-gap==m.get(button+O['W_W'])-margin
+                    else:
+                        assert m.get(text+O['W_W'])==widths[text] and m.get(title+O['W_W'])==title_width
+                    assert (m.get(title+O['W_Y']),m.get(title+O['W_H']))==title_yh
+                    assert m.nodes[title]['text']==label
+                    assert all(m.nodes[title][k]==v for k,v in attributes.items())
+                    for c in children:
+                        if c!=text: assert m.get(c+O['W_W'])==widths[c]
+
 for address in (0x523038, 0x4aa2cc, 0x4b0efc, 0x4a4ae8):
     for grid in ((0, 1) if address == 0x4a4ae8 else (0,)):
         m = Machine(); w = m.page('folder_page', 'table_client')
@@ -572,6 +673,52 @@ for address in (0x523038, 0x4aa2cc, 0x4b0efc, 0x4a4ae8):
         # Preparing an existing pool does not recreate or resize its rows.
         before = len(m.nodes)
         assert m.call(address=address, args=(w, w, 4, 0)) == 0 and len(m.nodes) == before
+        if not grid:
+            for row in rows[:2]:  # independently recreated rows as well as repeated reuse
+                check_title_bounds(m,m.nodes[row]['children'][0])
+            if address==0x523038:
+                # Execute the real folder text/style rebind after layout: its stock 140/190px
+                # reset must no longer undo the computed width while a row pool is recycled.
+                button=m.nodes[rows[0]]['children'][0]
+                title=next(c for c in m.nodes[button]['children'] if m.nodes[c]['name']=='scrlabel_name')
+                width=m.get(title+O['W_W'])
+                m.row_record=m.alloc(0x80); m.word(m.row_record+0x34,8)
+                for name in ('deque_at','tk_snprintf','widget_set_text_utf8','file_is_playing'):
+                    m.handlers[syms[name]]=name
+                for navbar in (0,1,0):
+                    m.byte(syms['g_navbar_status'],navbar)
+                    label='再利用された長いフォルダー名 '*5
+                    m.word(m.row_record+8,m.string(label))
+                    assert m.call(address=0x522304,args=(button,7,0,0))==0
+                    assert m.nodes[title]['text']==label
+                    assert m.get(title+O['W_W'])==(width if variant=='compact' else 140 if navbar else 190)
+        else:
+            assert all(m.get(n+O['W_CHILDREN_LAYOUT'])==0 for row in rows for n in m.nodes[row]['children'])
+passed()
+
+# The three non-pooled constructors: album tracks, artist tracks and playlists.
+# These use distinct title/container names and must receive the same native layout behavior.
+for address in (0x4a62c0,0x4adcbc,0x4b2864):
+    for reopen in range(2):
+        m=Machine(); w=m.page('artistinfo_page','scroll_view')
+        m.nodes[w]['name']='scroll_view_track'
+        m.row_record=m.alloc(0x80)
+        for off in (8,12,16,24): m.word(m.row_record+off,m.string('日本語 Title'))
+        m.word(m.row_record+0x48,1)
+        for name in ('button_create','list_item_create','image_create','view_create','hscroll_label_create',
+                     'gif_image_create','widget_use_style','widget_set_name','widget_set_text_utf8',
+                     'widget_set_visible','widget_on','widget_destroy_children','image_set_draw_type',
+                     'image_base_set_image','set_hscroll_label_attribute','hscroll_label_set_only_focus',
+                     'hscroll_label_set_ellipses','hscroll_label_set_speed','gif_image_play','deque_at',
+                     'deque_size','tk_snprintf','batch_get_selectitem','file_is_playing','getFormatString',
+                     'getMusicByPlayList','get_albumcover_listsize','mclGetPlayStatus','list_get_img_pic',
+                     'strcmp@GLIBC_2.0','toolsTrimLeft','toolsTrimRight'):
+            m.handlers[syms[name]]=name
+        m.handlers[0x4aad10]='row_toolbar'
+        assert m.call(address=address,args=(w,0,0,0))==0
+        buttons=[n for n,v in m.nodes.items() if v['type']=='button']
+        assert len(buttons)==1
+        check_title_bounds(m,buttons[0])
 passed()
 
 # Long Return executes the stock gates and release filter in both variants.

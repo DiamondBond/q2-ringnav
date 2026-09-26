@@ -13,12 +13,9 @@ import tempfile
 import zipfile
 from build import ROOT, VERSIONS, ZIP_SHA, DEMO_SHA, build, check, run, sha, source_sha256
 
-TAG = '3.4R'
-ASSETS = {'normal': 'Q2.Firmware.V3.4.zip', 'compact': 'Q2.Firmware.V3.4-compact.zip'}
-NOTES = '''- List ends: the first turn past an end nudges the selection outline against the end, and the next turn in the same direction wraps to the other end of the local folder and music lists.
-- The player's own scrollbar now appears during wheel navigation and fades on its normal timer.
-- The local and online search result lists navigate with the wheel and the centre button.
-- Compact Return: hold opens Now Playing and stays there after release; the next short Return goes back to where you were, and holding Return on Now Playing uses the stock Home shortcut.
+TAG = '3.5R'
+ASSETS = {'normal': 'Q2.Firmware.V3.5.zip', 'compact': 'Q2.Firmware.V3.5-compact.zip'}
+NOTES = '''- Compact: ordinary row titles now use the full row width on every native relayout, reserving space only for visible artwork and trailing controls. Widths follow scrolling, row reuse and artwork/control visibility changes; short titles stay at their left position and overflowing titles still scroll or ellipsize.
 '''
 
 
